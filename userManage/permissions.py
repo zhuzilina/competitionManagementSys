@@ -66,3 +66,16 @@ class NotChangingSelf(permissions.BasePermission):
         if request.method == 'PATCH':
             return obj != request.user
         return True
+
+class IsCompAdmin(permissions.BasePermission):
+    """
+    仅竞赛管理员
+    """
+    def has_permission(self, request, view):
+        # 判断用户是否已登录
+        if not (request.user and request.user.is_authenticated):
+            return False
+        # 检查用户是否是合法角色
+        allowed_roles = ['CompetitionAdministrator']
+
+        return request.user.groups.filter(name__in=allowed_roles).exists()

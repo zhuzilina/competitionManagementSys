@@ -11,7 +11,7 @@ def certificate_upload_path(instance, filename):
                         filename
                         )
 
-class Competition(models.Model):
+class Certificate(models.Model):
     # 使用uuid作为证书id
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # 证书编号

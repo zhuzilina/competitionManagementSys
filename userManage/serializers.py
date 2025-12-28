@@ -1,7 +1,8 @@
+from django.db import transaction
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-
+from userProfile.models import Profile
 User = get_user_model()
 
 
@@ -70,10 +71,13 @@ class RegisterSerializer(serializers.ModelSerializer):
     re_password = serializers.CharField(write_only=True, required=True)
     # 角色字段
     role_names = serializers.ListField(child=serializers.CharField(),write_only=True, required=False)
+    # 档案资料字段
+    real_name = serializers.CharField(write_only=True, required=True)
+    department = serializers.CharField(write_only=True, required=True)
 
     class Meta:
         model = User
-        fields = ['user_id', 'username', 'password', 're_password', 'role_names']
+        fields = ['user_id', 'username', 'password', 're_password', 'real_name', 'department', 'role_names']
         extra_kwargs = {
             'password':{'write_only':True},
         }
@@ -86,23 +90,32 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # 移除不需要存入User模型的字段
         validated_data.pop('re_password')
+        real_name = validated_data.pop('real_name')
+        department = validated_data.pop('department')
         role_names = validated_data.pop('role_names', [])
 
-        # 创建用户
-        user = User.objects.create_user(
-            user_id=validated_data['user_id'],
-            username=validated_data.get('username',validated_data['user_id']),# 默认为user_id
-            password=validated_data['password']
-        )
+        # 创建用户(保证原子性）
+        with transaction.atomic():
+            user = User.objects.create_user(
+                user_id=validated_data['user_id'],
+                username=validated_data.get('username',validated_data['user_id']),# 默认为user_id
+                password=validated_data['password']
+            )
+            # 创建对应的Profile信息
+            Profile.objects.create(
+                user=user,
+                real_name=real_name,
+                department=department
+            )
 
-        # 绑定角色
-        if role_names:
-            groups = Group.objects.filter(name__in=role_names)
-            user.groups.set(groups)
-        else:
-            # 默认给一个学生角色
-            default_group, _ = Group.objects.get_or_create(name='Student')
-            user.groups.add(default_group)
+            # 绑定角色
+            if role_names:
+                groups = Group.objects.filter(name__in=role_names)
+                user.groups.set(groups)
+            else:
+                # 默认给一个学生角色
+                default_group, _ = Group.objects.get_or_create(name='Student')
+                user.groups.add(default_group)
 
         return user
 

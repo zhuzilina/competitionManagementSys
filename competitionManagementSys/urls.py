@@ -23,7 +23,9 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('user/', include('userManage.urls')),
+    path('user-profile/', include('userProfile.urls')),
     path('comp/', include('competitions.urls')),
+    path('cert/',include('certificate.urls'))
 ]
 
 if settings.DEBUG:
