@@ -14,3 +14,15 @@ class CompetitionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
         read_only_fields = ['creator', 'created_at']
+
+
+class CompetitionLevelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompetitionLevel
+        fields = '__all__'  # 或者指定具体字段 ['id', 'name', 'description']
+
+
+class CompetitionCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompetitionCategory
+        fields = '__all__'

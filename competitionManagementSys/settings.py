@@ -26,6 +26,10 @@ SECRET_KEY = 'django-insecure-gt17a_a03%5ao5fgh(it5apy*frq2g@3!1c&j=u9#me7gl7=3q
 DEBUG = True
 
 ALLOWED_HOSTS = []
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8848",  # Vue 默认端口
+    "http://127.0.0.1:8848",
+]
 
 
 # Application definition
@@ -42,10 +46,14 @@ INSTALLED_APPS = [
     'competitions.apps.CompetitionsConfig',
     'certificate.apps.CertificateConfig',
     'award.apps.AwardConfig',
-    'userProfile.apps.UserprofileConfig'
+    'userProfile.apps.UserprofileConfig',
+    'django_extensions',
+    'corsheaders',
+    'django_filters',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -116,7 +124,7 @@ REST_FRAMEWORK = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': False,
     'ALGORITHM':'HS256',

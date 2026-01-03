@@ -12,11 +12,11 @@ class CertificateViewSet(viewsets.ModelViewSet):
         """
         权限拆分：
         - 查询 (list, retrieve): 登录用户即可
-        - 增删改 (create, update, destroy): 需管理员或教师角色
+        - 增删改 (create, update, destroy): 需管理员角色
         """
         if self.action in ['list', 'retrieve']:
             return [permissions.IsAuthenticated()]
-        return [permissions.IsAuthenticated(), IsCompAdminOrReadOnly()]
+        return [IsCompAdminOrReadOnly()]
 
     def perform_destroy(self, instance):
         """

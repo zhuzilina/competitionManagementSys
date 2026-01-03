@@ -2,14 +2,20 @@ from django.db import models
 import uuid
 import os
 
+from django.utils import timezone
+
+
 # Create your models here.
 def certificate_upload_path(instance, filename):
     ext = filename.split('.')[-1]
-    filename = f'{instance.id}.{ext}'
-    return os.path.join('certificate',
-                        instance.created_at.strftime('%Y/%m'),
-                        filename
-                        )
+    # 此时 id 已经由 UUIDField 的 default 产生
+    new_filename = f'{instance.id}.{ext}'
+
+    # 关键修改：直接使用 timezone.now()
+    # 因为上传那一刻的时间基本上就是创建时间
+    date_path = timezone.now().strftime('%Y/%m')
+
+    return os.path.join('certificate', date_path, new_filename)
 
 class Certificate(models.Model):
     # 使用uuid作为证书id

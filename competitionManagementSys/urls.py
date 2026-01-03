@@ -25,7 +25,8 @@ urlpatterns = [
     path('user/', include('userManage.urls')),
     path('user-profile/', include('userProfile.urls')),
     path('comp/', include('competitions.urls')),
-    path('cert/',include('certificate.urls'))
+    path('cert/',include('certificate.urls')),
+    path('award/', include('award.urls')),
 ]
 
 if settings.DEBUG:

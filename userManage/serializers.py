@@ -2,6 +2,8 @@ from django.db import transaction
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+
+from userManage.models import Menu
 from userProfile.models import Profile
 User = get_user_model()
 
@@ -119,3 +121,41 @@ class RegisterSerializer(serializers.ModelSerializer):
 
         return user
 
+
+class MenuTreeSerializer(serializers.ModelSerializer):
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Menu
+        fields = ['id', 'parent', 'title', 'icon', 'path', 'component', 'permission_code', 'menu_type', 'children']
+
+    def get_children(self, obj):
+        # 从 context 获取有权限的 ID 列表
+        valid_menu_ids = self.context.get('valid_menu_ids')
+
+        # 获取该节点下的所有子节点
+        children_queryset = obj.children.all()
+
+        # 如果提供了有效 ID 列表，则进行过滤
+        if valid_menu_ids is not None:
+            children_queryset = children_queryset.filter(id__in=valid_menu_ids)
+
+        if children_queryset.exists():
+            # 递归调用时，记得再次传递 context
+            return MenuTreeSerializer(
+                children_queryset,
+                many=True,
+                context=self.context
+            ).data
+        return []
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, min_length=6)
+    confirm_password = serializers.CharField(required=True)
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({"confirm_password": "两次输入的新密码不一致"})
+        return data

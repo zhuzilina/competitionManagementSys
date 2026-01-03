@@ -1,7 +1,9 @@
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, permissions, filters
 from .models import Profile
 from .serializers import ProfileSerializer
-from userManage.permissions import IsCompAdmin
+from userManage.permissions import IsAdmin, IsCompAdmin
+
 
 class MyProfileView(generics.RetrieveUpdateAPIView):
     """
@@ -18,16 +20,13 @@ class MyProfileView(generics.RetrieveUpdateAPIView):
 
 
 class ProfileSearchByFieldNameView(generics.ListAPIView):
-    """
-    通过姓名模糊查找用户 Profile
-    """
     serializer_class = ProfileSerializer
-    permission_classes = [IsCompAdmin]
-
-    # 获取所有 Profile 记录，并预加载 user 以提高性能
+    permission_classes = [IsCompAdmin | IsAdmin]
     queryset = Profile.objects.all().select_related('user')
 
-    # 配置搜索后端
-    filter_backends = [filters.SearchFilter]
-    # 指定搜索的字段，'real_name' 对应 Profile 里的字段
-    search_fields = ['real_name']
+    # 1. 切换后端为 DjangoFilterBackend
+    filter_backends = [DjangoFilterBackend]
+
+    # 2. 使用 filterset_fields 明确指定过滤字段
+    # 默认就是精确查询
+    filterset_fields = ['real_name']
