@@ -5,12 +5,15 @@ from django.http import HttpResponse
 from rest_framework import viewsets
 from datetime import datetime
 from django.db.models import Prefetch
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import Award
 from .serializers import AwardSerializer
 from .serializers import AwardReportSerializer
 from userManage.permissions import IsCompAdminOrReadOnly,IsCompAdmin
+from django.db.models import Count,Q,F
+from django.db.models.functions import ExtractYear
 
 User = get_user_model()
 
@@ -18,6 +21,55 @@ class AwardViewSet(viewsets.ModelViewSet):
     queryset = Award.objects.all().select_related('competition', 'certificate').prefetch_related('participants', 'instructors')
     serializer_class = AwardSerializer
     permission_classes = [IsCompAdminOrReadOnly]
+
+    def get_queryset(self):
+        """
+        重写此方法以支持 user_id 过滤
+        """
+        queryset = super().get_queryset()
+
+        # 获取查询参数
+        user_query_id = self.request.query_params.get('user_id')
+
+        if user_query_id:
+            # 注意：这里要用你 User 模型中实际存储 "23101100514" 的字段名
+            # 如果你的 User 模型中定义学号的字段叫 user_id，那就写 user_id
+            queryset = queryset.filter(
+                Q(participants__user_id=user_query_id) |
+                Q(instructors__user_id=user_query_id)
+            ).distinct()
+
+            return queryset
+
+    @action(detail=False, methods=['get'], url_path='my-awards')
+    def get_my_awards(self, request):
+        """
+        通过 POST 请求体获取当前登录用户的获奖记录
+        URL: /api/awards/my-awards/
+        """
+        # 1. 获取当前登录用户对象
+        user = request.user
+
+        # 2. 如果是匿名用户，返回 401
+        if not user.is_authenticated:
+            return Response({"detail": "请先登录"}, status=401)
+
+        # 3. 在获奖记录中查找：
+        #    参赛学生包含当前用户 OR 指导老师包含当前用户
+        #    这里直接使用 user 对象进行过滤，Django 会自动处理主键关联
+        queryset = Award.objects.filter(
+            Q(participants=user) | Q(instructors=user)
+        ).select_related(
+            'competition', 'certificate'
+        ).prefetch_related(
+            'participants', 'instructors'
+        ).distinct()
+
+        # 4. 调用序列化器进行序列化
+        serializer = self.get_serializer(queryset, many=True)
+
+        # 5. 返回结果
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         # 自动关联当前登录用户为录入人
@@ -28,9 +80,9 @@ class AwardReportView(APIView):
     """
     获奖统计报表
     网页查看
-    GET /api/award/report/?group_by=student&start_date=2025-01-01
+    GET /award/report/?group_by=student&start_date=2025-01-01
     下载报表
-    GET /api/award/report/?group_by=student&start_date=2025-01-01&format=excel
+    GET /award/report/?group_by=student&start_date=2025-01-01&format=excel
     """
     permission_classes = [IsCompAdmin]
 
@@ -137,3 +189,85 @@ class AwardReportView(APIView):
             "title": getattr(profile, 'title', '-'),
             "awards": awards
         }
+
+
+class AwardStatisticsView(APIView):
+    """
+    获奖信息多维度统计API
+    """
+    permission_classes = [IsCompAdmin]
+
+    def get(self, request):
+        # 1. 基础总数统计
+        total_awards = Award.objects.count()
+
+        # 2. 按竞赛类别统计 (基于 CompetitionCategory)
+        category_stats = Award.objects.values(
+            name=F('competition__category__name')
+        ).annotate(
+            count=Count('id')
+        ).order_by('-count')
+
+        # 3. 按竞赛级别统计 (基于 CompetitionLevel)
+        level_stats = Award.objects.values(
+            name=F('competition__level__name')
+        ).annotate(
+            count=Count('id')
+        ).order_by('-count')
+
+        # 4. 按年度统计及环比计算
+        # 提取日期中的年份进行分组
+        yearly_stats_query = Award.objects.annotate(
+            year=ExtractYear('award_date')
+        ).values('year').annotate(
+            count=Count('id')
+        ).order_by('year')
+
+        yearly_data = list(yearly_stats_query)
+        # 计算变动率 (Growth Rate)
+        for i in range(len(yearly_data)):
+            if i > 0 and yearly_data[i - 1]['count'] > 0:
+                prev = yearly_data[i - 1]['count']
+                curr = yearly_data[i]['count']
+                growth_rate = ((curr - prev) / prev) * 100
+                yearly_data[i]['growth_rate'] = f"{round(growth_rate, 2)}%"
+            else:
+                yearly_data[i]['growth_rate'] = "0%"
+
+        # 5. 按学院部门统计
+        # 注意：这里需要跨两层：Award -> participants (User) -> profile (Profile)
+        dept_stats = Award.objects.values(
+            name=F('participants__profile__department')
+        ).annotate(
+            count=Count('id', distinct=True)  # 使用distinct防止一个奖项多个学生导致重复计算
+        ).exclude(name__isnull=True).order_by('-count')
+
+        # 6. 人员总数统计 (去重)
+        total_students = Award.objects.aggregate(
+            count=Count('participants', distinct=True)
+        )['count']
+
+        total_instructors = Award.objects.aggregate(
+            count=Count('instructors', distinct=True)
+        )['count']
+
+        # 7. 获奖等级分布 (金奖、一等奖等)
+        level_distribution = Award.objects.values('award_level').annotate(
+            count=Count('id')
+        ).order_by('-count')
+
+        # 封装结果
+        data = {
+            "summary": {
+                "total_awards": total_awards,
+                "total_students": total_students,
+                "total_instructors": total_instructors,
+            },
+            "by_category": category_stats,
+            "by_level": level_stats,
+            "by_department": dept_stats,
+            "by_year": yearly_data,
+            "by_award_rank": level_distribution
+        }
+
+        return Response(data)
