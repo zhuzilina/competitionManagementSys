@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'django_extensions',
     'corsheaders',
     'django_filters',
+    'apply.apps.ApplyConfig'
 ]
 
 MIDDLEWARE = [
