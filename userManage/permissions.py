@@ -18,6 +18,24 @@ class IsCompAdminOrReadOnly(permissions.BasePermission):
         return request.user.groups.filter(name__in=allowed_roles).exists()
 
 
+class IsAdminOrReadOnly(permissions.BasePermission):
+    """
+    仅管理者可修改，其余登录用户仅查看。用于用户信息获取业务管理
+    """
+    def has_permission(self, request, view):
+        # 判断用户是否已登录
+        if not (request.user and request.user.is_authenticated):
+            return False
+
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # 检查用户是否是合法角色
+        allowed_roles = ['Administrator']
+
+        return request.user.groups.filter(name__in=allowed_roles).exists()
+
+
 class IsAdmin(permissions.BasePermission):
     """
     超级管理者： 管理员。用于修改用户

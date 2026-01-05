@@ -27,6 +27,7 @@ urlpatterns = [
     path('comp/', include('competitions.urls')),
     path('cert/',include('certificate.urls')),
     path('award/', include('award.urls')),
+    path('apply/', include('apply.urls')),
 ]
 
 if settings.DEBUG:

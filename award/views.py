@@ -5,7 +5,6 @@ from django.http import HttpResponse
 from rest_framework import viewsets
 from datetime import datetime
 from django.db.models import Prefetch
-from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import Award
@@ -23,57 +22,33 @@ class AwardViewSet(viewsets.ModelViewSet):
     permission_classes = [IsCompAdminOrReadOnly]
 
     def get_queryset(self):
-        """
-        重写此方法以支持 user_id 过滤
-        """
         queryset = super().get_queryset()
-
-        # 获取查询参数
         user_query_id = self.request.query_params.get('user_id')
 
+        # 如果传了 user_id='me'，自动替换为当前登录用户 ID
+        if user_query_id == 'me':
+            if self.request.user.is_authenticated:
+                user_query_id = self.request.user.user_id  # 假设你的字段名是这个
+            else:
+                return Award.objects.none()
+
         if user_query_id:
-            # 注意：这里要用你 User 模型中实际存储 "23101100514" 的字段名
-            # 如果你的 User 模型中定义学号的字段叫 user_id，那就写 user_id
             queryset = queryset.filter(
                 Q(participants__user_id=user_query_id) |
                 Q(instructors__user_id=user_query_id)
             ).distinct()
 
-            return queryset
-
-    @action(detail=False, methods=['get'], url_path='my-awards')
-    def get_my_awards(self, request):
-        """
-        通过 POST 请求体获取当前登录用户的获奖记录
-        URL: /api/awards/my-awards/
-        """
-        # 1. 获取当前登录用户对象
-        user = request.user
-
-        # 2. 如果是匿名用户，返回 401
-        if not user.is_authenticated:
-            return Response({"detail": "请先登录"}, status=401)
-
-        # 3. 在获奖记录中查找：
-        #    参赛学生包含当前用户 OR 指导老师包含当前用户
-        #    这里直接使用 user 对象进行过滤，Django 会自动处理主键关联
-        queryset = Award.objects.filter(
-            Q(participants=user) | Q(instructors=user)
-        ).select_related(
-            'competition', 'certificate'
-        ).prefetch_related(
-            'participants', 'instructors'
-        ).distinct()
-
-        # 4. 调用序列化器进行序列化
-        serializer = self.get_serializer(queryset, many=True)
-
-        # 5. 返回结果
-        return Response(serializer.data)
+        return queryset
 
     def perform_create(self, serializer):
         # 自动关联当前登录用户为录入人
         serializer.save(creator=self.request.user)
+
+    def perform_destroy(self, instance):
+        cert = instance.certificate
+        instance.delete()  # 删除获奖记录
+        if cert:
+            cert.delete()
 
 
 class AwardReportView(APIView):

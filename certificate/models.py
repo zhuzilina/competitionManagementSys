@@ -33,3 +33,13 @@ class Certificate(models.Model):
 
     def __str__(self):
         return self.cert_no
+
+    def delete(self, *args, **kwargs):
+        # 1. 物理删除文件
+        if self.image_uri and os.path.isfile(self.image_uri.path):
+            try:
+                os.remove(self.image_uri.path)
+            except Exception as e:
+                pass
+                # 2. 删除数据库记录
+        super().delete(*args, **kwargs)

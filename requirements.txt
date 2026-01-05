@@ -4,3 +4,5 @@ openpyxl~=3.1.5
 djangorestframework_simplejwt~=5.5.1
 django-mptt~=0.18.0
 django-filter~=25.2
+django-fsm
+django-notifications-hq

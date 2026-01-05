@@ -2,7 +2,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, permissions, filters
 from .models import Profile
 from .serializers import ProfileSerializer
-from userManage.permissions import IsAdmin, IsCompAdmin
+from userManage.permissions import IsAdminOrReadOnly
 
 
 class MyProfileView(generics.RetrieveUpdateAPIView):
@@ -21,7 +21,7 @@ class MyProfileView(generics.RetrieveUpdateAPIView):
 
 class ProfileSearchByFieldNameView(generics.ListAPIView):
     serializer_class = ProfileSerializer
-    permission_classes = [IsCompAdmin | IsAdmin]
+    permission_classes = [IsAdminOrReadOnly]
     queryset = Profile.objects.all().select_related('user')
 
     # 1. 切换后端为 DjangoFilterBackend
