@@ -61,3 +61,39 @@ class Competition(models.Model):
     class Meta:
         db_table = 'sys_competition'
         verbose_name = "竞赛信息"
+
+
+class CompetitionEvent(models.Model):
+    """
+    竞赛发布/场次 (Instance)
+    例如：第十五届蓝桥杯、2024年ACM校赛
+    """
+    STATUS_CHOICES = (
+        ('active', '进行中'),
+        ('reviewing', '审核/评奖中'),
+        ('archived', '已归档'),  # 归档即代表结束，释放非获奖数据
+    )
+
+    # 关联基础模型 (你的 Competition)
+    competition = models.ForeignKey(
+        'Competition',
+        on_delete=models.CASCADE,
+        related_name='events',
+        verbose_name="所属竞赛"
+    )
+
+    name = models.CharField(max_length=255, verbose_name="本次赛事名称")  # 如 "2024春季选拔赛"
+    start_time = models.DateTimeField(verbose_name="报名开始时间")
+    end_time = models.DateTimeField(verbose_name="报名结束时间")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', verbose_name="状态")
+
+    # --- 归档后保留的统计数据 (快照) ---
+    final_participants_count = models.IntegerField(default=0, verbose_name="最终参赛人数(归档后)")
+    final_winners_count = models.IntegerField(default=0, verbose_name="最终获奖人数(归档后)")
+
+    class Meta:
+        db_table = 'sys_competition_event'
+        verbose_name = "赛事场次"
+
+    def __str__(self):
+        return f"{self.competition.title} - {self.name}"

@@ -11,7 +11,17 @@ class Award(models.Model):
         verbose_name="所属竞赛"
     )
 
-    # 2. 关联证书 (一对一：通常一张获奖记录对应一张唯一的证书文件)
+    # 2. 关联竞赛活动 (多对一：一条获奖记录对应一个竞赛活动)
+    event = models.ForeignKey(
+        'competitions.CompetitionEvent',  # 假设你的发布模型叫此名
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="awards",
+        verbose_name="所属赛事场次"
+    )
+
+    # 3. 关联证书 (一对一：通常一张获奖记录对应一张唯一的证书文件)
     # 使用 OneToOneField 确保证书不被重复绑定
     certificate = models.OneToOneField(
         'certificate.Certificate',
@@ -22,7 +32,7 @@ class Award(models.Model):
         verbose_name="获奖证书"
     )
 
-    # 3. 关联人员 (多对多)
+    # 4. 关联人员 (多对多)
     # 参与学生
     participants = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
@@ -36,11 +46,11 @@ class Award(models.Model):
         verbose_name="指导老师"
     )
 
-    # 4. 获奖信息
+    # 5. 获奖信息
     award_level = models.CharField(max_length=50, verbose_name="获奖等级") # 如：一等奖、金奖
     award_date = models.DateField(verbose_name="获奖日期")
 
-    # 5. 审计信息
+    # 6. 审计信息
     creator = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
