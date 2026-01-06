@@ -28,6 +28,7 @@ urlpatterns = [
     path('cert/',include('certificate.urls')),
     path('award/', include('award.urls')),
     path('apply/', include('apply.urls')),
+    path('notification/', include('notification.urls')),
 ]
 
 if settings.DEBUG:

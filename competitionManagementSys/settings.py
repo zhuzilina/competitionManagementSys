@@ -50,7 +50,9 @@ INSTALLED_APPS = [
     'django_extensions',
     'corsheaders',
     'django_filters',
-    'apply.apps.ApplyConfig'
+    'apply.apps.ApplyConfig',
+    'notification.apps.NotificationConfig',
+    'notifications',
 ]
 
 MIDDLEWARE = [
@@ -152,3 +154,5 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 STATIC_URL = 'static/'
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
