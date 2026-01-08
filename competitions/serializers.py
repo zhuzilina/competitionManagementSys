@@ -30,17 +30,15 @@ class CompetitionCategorySerializer(serializers.ModelSerializer):
 
 
 class CompetitionEventSerializer(serializers.ModelSerializer):
-    # 嵌套显示基础竞赛的标题，方便前端展示
     competition_title = serializers.ReadOnlyField(source='competition.title')
-    competition_description = serializers.ReadOnlyField(source='competition.description')
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = CompetitionEvent
         fields = [
-            'id', 'competition', 'competition_title','competition_description', 'name',
+            'id', 'competition', 'competition_title', 'name',
             'start_time', 'end_time', 'status', 'status_display',
             'final_participants_count', 'final_winners_count'
         ]
-        # 统计数据由系统自动计算，不应通过接口直接修改
-        read_only_fields = ['final_participants_count', 'final_winners_count']
+        # 将 status 加入只读，强制走模型默认值或后端逻辑
+        read_only_fields = ['status', 'final_participants_count', 'final_winners_count']

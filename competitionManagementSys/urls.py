@@ -29,6 +29,7 @@ urlpatterns = [
     path('award/', include('award.urls')),
     path('apply/', include('apply.urls')),
     path('notification/', include('notification.urls')),
+    path('team/', include('team.urls')),
 ]
 
 if settings.DEBUG:

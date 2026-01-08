@@ -3,6 +3,9 @@ from django.db import transaction
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from notifications.signals import notify
+from django.contrib.auth import get_user_model
+
 
 from award.models import Award
 from .models import Competition, CompetitionLevel, CompetitionCategory, CompetitionEvent
@@ -10,6 +13,8 @@ from .serializers import CompetitionSerializer, CompetitionLevelSerializer, Comp
     CompetitionEventSerializer
 from userManage.permissions import IsCompAdminOrReadOnly
 
+
+User = get_user_model()
 class CompetitionViewSet(viewsets.ModelViewSet):
     queryset = Competition.objects.all()
     serializer_class = CompetitionSerializer
@@ -63,19 +68,109 @@ class CompetitionEventViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsCompAdminOrReadOnly]
 
+    def _notify_all_participants(self, event, message):
+        """
+        内部辅助方法：向所有报名该赛事的成员发送通知
+        """
+        # 1. 获取该赛事下所有团队的队长 ID
+        leader_ids = event.teams.values_list('leader_id', flat=True)
+
+        # 2. 获取该赛事下所有团队的队员 ID (ManyToManyField)
+        member_ids = event.teams.values_list('members__id', flat=True)
+
+        # 3.获取该赛事下所有团队的指导老师 ID
+
+        teacher_ids = event.teams.values_list('teachers__id', flat=True)
+
+        # 3. 合并 ID 并去重，排除 None 值
+        all_user_ids = set(list(leader_ids) + list(member_ids) +list(teacher_ids))
+        all_user_ids.discard(None)
+
+        if not all_user_ids:
+            return
+
+        # 4. 获取对应的用户对象列表
+        recipients = User.objects.filter(id__in=all_user_ids)
+
+        # 5. 批量发送通知
+        # verb: 动作描述, target: 关联的对象(当前赛事)
+        notify.send(
+            sender=self.request.user,  # 发送者通常是当前操作的管理员
+            recipient=recipients,  # 接收者可以是 QuerySet 或 List
+            verb=message,
+            target=event
+        )
+
     def get_queryset(self):
-        """
-        过滤逻辑：
-        - 学生只能看到 'active' 和 'reviewing' 的比赛
-        - 管理员可以看到所有（包括 archived）
-        """
         user = self.request.user
-        if user.is_staff or user.groups.filter(name__in=['Teacher', 'Admin']).exists():
+        # 管理员可以看到所有
+        if user.is_staff or user.groups.filter(name__in=['CompetitionAdministrator']).exists():
             return CompetitionEvent.objects.all().order_by('-start_time')
 
-        # 普通学生只能看到进行中或审核中的
-        return CompetitionEvent.objects.filter(status__in=['active', 'reviewing'])
+        # 学生和教师只能看到归档以前的所有阶段
+        # 包含：registration, screening, ongoing, awarding
+        return CompetitionEvent.objects.exclude(status='archived').order_by('-start_time')
 
+    def perform_create(self, serializer):
+        serializer.save(status='registration')
+
+    @action(detail=True, methods=['post'], url_path='next-stage')
+    def advance_stage(self, request, pk=None):
+        """
+        管理员接口：将赛事推进到下一个阶段
+        逻辑：registration -> screening -> ongoing -> awarding -> (archived需调用专用接口)
+        """
+        event = self.get_object()
+
+        status_messages = {
+            'screening': '报名已截止，赛事进入初筛阶段，请关注审核结果。',
+            'ongoing': '恭喜！初筛已结束，赛事现已正式开启。',
+            'awarding': '比赛已结束，正在进行最后的成果审核与奖项录入。',
+        }
+
+        # 定义状态流转顺序
+        stage_flow = ['registration', 'screening', 'ongoing', 'awarding']
+
+        if event.status not in stage_flow:
+            return Response({"detail": f"当前状态 [{event.status}] 不支持自动流转，请检查或手动归档"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        current_index = stage_flow.index(event.status)
+
+        # 检查是否还有下一阶段
+        if current_index < len(stage_flow) - 1:
+            next_status = stage_flow[current_index + 1]
+            event.status = next_status
+            event.save()
+
+            # 发送全员通知
+            if next_status in status_messages:
+                self._notify_all_participants(event, status_messages[next_status])
+
+            return Response({
+                "detail": f"赛事阶段已更新为: {event.get_status_display()}",
+                "current_status": event.status
+            })
+        else:
+            return Response({"detail": "已到达评奖阶段，下一步请执行归档操作"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='set-status')
+    def set_specific_status(self, request, pk=None):
+        """
+        管理员接口：手动强转状态（用于应对突发情况，如打回重新报名）
+        data: {"status": "registration"}
+        """
+        event = self.get_object()
+        target_status = request.data.get('status')
+
+        valid_statuses = [s[0] for s in CompetitionEvent.STATUS_CHOICES]
+        if target_status not in valid_statuses:
+            return Response({"detail": "无效的状态值"}, status=status.HTTP_400_BAD_REQUEST)
+
+        event.status = target_status
+        event.save()
+        return Response({"detail": f"状态已成功修改为: {event.get_status_display()}"})
     @action(detail=True, methods=['post'], url_path='archive')
     def archive_event(self, request, pk=None):
         """
@@ -85,6 +180,11 @@ class CompetitionEventViewSet(viewsets.ModelViewSet):
         3. 销毁该赛事下的所有 Team 记录 (释放空间)
         """
         event = self.get_object()
+
+        # 安全检查：只有处于评奖阶段的赛事才能归档
+        if event.status != 'awarding':
+            return Response({"detail": "赛事尚未完成评奖阶段，不能归档。"},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         # 1. 检查状态，避免重复归档
         if event.status == 'archived':

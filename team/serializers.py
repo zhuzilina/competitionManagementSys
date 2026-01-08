@@ -16,21 +16,29 @@ class TeamSerializer(serializers.ModelSerializer):
     works = serializers.FileField(required=False, allow_null=True)
     attachment = serializers.FileField(required=False, allow_null=True)
 
+    # 使用 user_id 而不是默认的 pk 进行关联录入
+    members = serializers.SlugRelatedField(
+        required=False,
+        many=True,
+        queryset=User.objects.all(),
+        slug_field='user_id'  # 假设你的 User 模型中存储学号的字段名是 user_id
+    )
+    teachers = serializers.SlugRelatedField(
+        required=False,
+        many=True,
+        queryset=User.objects.all(),
+        slug_field='user_id'
+    )
+
     class Meta:
         model = Team
         fields = [
             'id', 'event', 'event_name', 'name', 'leader', 'leader_name',
-            'members', 'teachers', 'works', 'applied_award_level',
+            'members', 'teachers', 'works', 'applied_award_level','temp_cert_no',
             'attachment', 'status', 'status_display', 'converted_award'
         ]
         # leader 是自动绑定的，status 和 converted_award 由后端逻辑控制
         read_only_fields = ['leader', 'status', 'converted_award']
-
-    def validate_event(self, value):
-        """校验赛事是否处于可报名状态"""
-        if value.status != 'active':
-            raise serializers.ValidationError("当前赛事不在报名阶段或已结束。")
-        return value
 
     def validate_teachers(self, value):
         """确保加入 teachers 字段的用户确实拥有 Teacher 角色"""
@@ -40,11 +48,15 @@ class TeamSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        """业务逻辑校验"""
         user = self.context['request'].user
-        # 1. 校验队长唯一性：一个学生只能担任一个队伍的队长
-        if Team.objects.filter(leader=user).exists():
-            raise serializers.ValidationError({"leader": "你已经作为队长创建过团队了，无法再次创建。"})
+        # 获取当前正在操作的实例（如果是创建，instance 为 None）
+        instance = self.instance
+
+        # 只有在创建新团队时，才校验是否已经是其他队的队长
+        if not instance:
+            event = data.get('event')
+            if Team.objects.filter(leader=user, event=event).exists():
+                raise serializers.ValidationError({"detail": "在该竞赛活动中，你已经创建过团队了。"})
 
         return data
 

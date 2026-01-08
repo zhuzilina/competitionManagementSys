@@ -3,7 +3,8 @@ import os
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework import viewsets, permissions, status
+from notifications.signals import notify
+from rest_framework import viewsets, permissions, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -18,10 +19,15 @@ class TeamViewSet(viewsets.ModelViewSet):
     serializer_class = TeamSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def is_comp_admin_user(self, user):
+        """内部辅助方法：判断是否为竞赛管理员"""
+        # 这里复用权限类的核心逻辑
+        return user.groups.filter(name='CompetitionAdministrator').exists()
+
     def get_queryset(self):
         """查询优化：学生看自己的队，老师看指导的队，管理员看全部"""
         user = self.request.user
-        if user.is_staff:
+        if self.is_comp_admin_user(user):
             return Team.objects.all()
 
         # 返回用户身为队长、成员或指导老师的所有团队
@@ -61,78 +67,203 @@ class TeamViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def perform_create(self, serializer):
-        """创建时自动绑定队长"""
-        serializer.save(leader=self.request.user)
+        user = self.request.user
+        event = serializer.validated_data.get('event')
+
+        # 1. 赛事状态校验 (使用异常抛出，确保中断执行)
+        if event.status != 'registration':
+            raise serializers.ValidationError({"detail": "当前赛事不在报名阶段，无法创建团队。"})
+
+        # 2. 队长唯一性校验
+        if Team.objects.filter(event=event, leader=user).exists():
+            raise serializers.ValidationError({
+                "detail": f"您已经在 '{event.name}' 中担任了队长，无法重复创建。"
+            })
+
+        # 3. 自动绑定队长
+        serializer.save(leader=user)
 
     def create(self, request, *args, **kwargs):
-        """重写创建方法，增加对非学生角色的限制（可选）"""
+        # 使用 .exists() 检查权限，简洁高效
         if not request.user.groups.filter(name='Student').exists():
-            return Response({"detail": "只有学生角色可以创建团队并担任队长。"},
-                            status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "只有学生可以创建团队并担任队长。"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         return super().create(request, *args, **kwargs)
 
-    def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
+    # 阶段一：初筛审核 (针对报名信息)
+    # ---------------------------------------------------------
+    @action(detail=True, methods=['post'], url_path='review-shortlist')
+    def review_shortlist(self, request, pk=None):
+        """
+        管理员接口：初筛审核（报名 -> 入围）
+        POST /team/info/{id}/review-shortlist/
+        data: {"action": "approve" or "reject", "reason": "可选理由"}
+        """
+        team = self.get_object()
+        if team.event.status != 'screening':
+            return Response({"detail": "赛事不在初筛阶段"}, status=400)
 
-        old_status = instance.status
-        new_status = request.data.get('status')
+        if not self.is_comp_admin_user(request.user):
+            return Response({"detail": "权限不足"}, status=status.HTTP_403_FORBIDDEN)
 
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
+        if team.status != 'submitted':
+            return Response({"detail": "当前状态不可进行初筛"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 判断审核通过动作
-        if new_status == 'approved' and old_status != 'approved':
-            # 1. 获取学生提交的证书编号
-            cert_no = instance.temp_cert_no
-            if not cert_no:
-                return Response({"detail": "学生尚未提供证书编号，无法通过审核"}, status=status.HTTP_400_BAD_REQUEST)
+        action_type = request.data.get('action')
+        reason = request.data.get('reason', '无')
 
-            # 2. 校验：只有管理员或老师有权审核
-            if not (request.user.is_staff or request.user.groups.filter(name__in=['CompetitionAdministrator']).exists()):
-                return Response({"detail": "您没有权限执行审核操作"}, status=status.HTTP_403_FORBIDDEN)
+        if action_type == 'approve':
+            team.status = 'shortlisted'
+            verb_msg = f'恭喜！您的团队“{team.name}”已通过初筛，获得参赛资格。'
+        elif action_type == 'reject':
+            team.status = 'rejected'
+            verb_msg = f'很遗憾，您的团队“{team.name}”未通过初筛。原因：{reason}'
+        else:
+            return Response({"detail": "未知操作"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 3. 校验：必须有附件
-            if not instance.attachment:
-                return Response({"detail": "该团队尚未上传证书附件，无法通过审核"}, status=status.HTTP_400_BAD_REQUEST)
+        team.save()
+
+        # 发送通知给队长
+        notify.send(
+            sender=request.user,
+            recipient=team.leader,
+            verb=verb_msg,
+            target=team
+        )
+
+        return Response(TeamSerializer(team).data)
+
+    # ---------------------------------------------------------
+    # 阶段二：获奖审核 (针对证书和奖项)
+    # ---------------------------------------------------------
+    @action(detail=True, methods=['post'], url_path='review-award')
+    def review_award(self, request, pk=None):
+        """
+        管理员接口：终审评奖（入围 -> 获奖/结束）
+        POST /team/info/{id}/review-award/
+        data: {"action": "award" or "finish"}
+        """
+        team = self.get_object()
+        if team.event.status != 'awarding':
+            return Response({"detail": "赛事不在获奖阶段"}, status=400)
+        if not self.is_comp_admin_user(request.user):
+            return Response({"detail": "权限不足"}, status=status.HTTP_403_FORBIDDEN)
+
+        team = self.get_object()
+        if team.status != 'shortlisted':
+            return Response({"detail": "只有入围团队可以进行获奖操作"}, status=status.HTTP_400_BAD_REQUEST)
+
+        action_type = request.data.get('action')
+
+        if action_type == 'finish':
+            # 参赛了但没得奖
+            team.status = 'ended'
+            team.save()
+            notify.send(
+                sender=request.user,
+                recipient=team.leader,
+                verb=f'您的团队“{team.name}”参赛流程已结束。',
+                target=team
+            )
+            return Response(TeamSerializer(team).data)
+
+        elif action_type == 'award':
+            # 获奖逻辑
+            if not team.temp_cert_no or not team.attachment:
+                return Response({"detail": "证书信息不完整"}, status=status.HTTP_400_BAD_REQUEST)
 
             with transaction.atomic():
-                # --- A. 创建正式证书 (Certificate) ---
+                # 1. 创建证书
                 new_cert = Certificate()
-                new_cert.cert_no = cert_no  # 使用前端传来的编号
-
-                if instance.attachment:
-                    filename = os.path.basename(instance.attachment.name)
-                    new_cert.image_uri.save(
-                        filename,
-                        instance.attachment.file,
-                        save=False
-                    )
+                new_cert.cert_no = team.temp_cert_no
+                if team.attachment:
+                    filename = os.path.basename(team.attachment.name)
+                    new_cert.image_uri.save(filename, team.attachment.file, save=False)
                 new_cert.save()
 
-                # --- B. 创建获奖记录 (Award) ---
+                # 2. 创建获奖记录
                 new_award = Award.objects.create(
-                    competition=instance.event.competition,
-                    event=instance.event,
+                    competition=team.event.competition,
+                    event=team.event,
                     certificate=new_cert,
-                    award_level=instance.applied_award_level,
+                    award_level=team.applied_award_level,
                     award_date=timezone.now().date(),
-                    team_name_snapshot=instance.name,
+                    team_name_snapshot=team.name,
                     creator=request.user
                 )
+                new_award.participants.set([team.leader] + list(team.members.all()))
+                new_award.instructors.set(team.teachers.all())
 
-                # --- C. 关联参与人 ---
-                all_students = [instance.leader] + list(instance.members.all())
-                new_award.participants.set(all_students)
-                new_award.instructors.set(instance.teachers.all())
+                # 3. 更新团队状态
+                team.converted_award = new_award
+                team.status = 'awarded'
+                team.save()
 
-                # --- D. 更新 Team 状态和关联关系 ---
-                instance.converted_award = new_award
-                instance.status = 'approved'
-                instance.save()
+                # 4. 发送获奖通知
+                notify.send(
+                    sender=request.user,
+                    recipient=team.leader,
+                    verb=f'您的获奖申请已通过！奖项：{team.applied_award_level}。',
+                    target=new_award  # 注意这里 target 改为了生成的 Award 对象
+                )
 
-                return Response(TeamSerializer(instance).data)
+                return Response(TeamSerializer(team).data)
 
-        # 常规修改
-        self.perform_update(serializer)
+        return Response({"detail": "无效的操作"}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['patch'], url_path='update-info')
+    def update_info(self, request, pk=None):
+        team = self.get_object()
+        event_status = team.event.status
+
+        # 1. 基础权限：必须是队长
+        if team.leader != request.user:
+            return Response({"detail": "仅限队长操作"}, status=403)
+
+        # 2. 根据赛事阶段控制可修改字段
+        if event_status == 'registration':
+            # 报名阶段，允许修改所有基础信息
+            fields = ['name', 'members', 'teachers']
+        elif event_status == 'ongoing':
+            # 比赛阶段，只允许提交作品
+            fields = ['works']
+        elif event_status == 'awarding':
+            # 评奖阶段，只允许补充证书信息
+            fields = ['temp_cert_no', 'attachment', 'applied_award_level']
+        else:
+            return Response({"detail": f"当前赛事阶段 ({team.event.get_status_display()}) 不允许修改任何信息"},
+                            status=400)
+
+        # 3. 过滤非法字段
+        filtered_data = {k: v for k, v in request.data.items() if k in fields}
+        if not filtered_data:
+            return Response({"detail": "当前阶段无权修改所选字段"}, status=400)
+
+        serializer = self.get_serializer(team, data=filtered_data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='my-participation')
+    def my_participation(self, request):
+        """
+        判断当前用户是否在特定竞赛活动下创建了团队
+        GET /team/info/my_participation/?event=1
+        """
+        event_id = request.query_params.get('event')
+
+        if not event_id:
+            return Response({"detail": "请提供 event 参数"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 检查是否是该竞赛的队长
+        is_leader = Team.objects.filter(event_id=event_id, leader=request.user).exists()
+
+        is_member = Team.objects.filter(event_id=event_id, members=request.user).exists()
+
+        return Response({
+            "is_leader": is_leader,
+            "is_member": is_member,
+            "can_create": not is_leader  # 方便前端直接判断是否显示“创建团队”按钮
+        })

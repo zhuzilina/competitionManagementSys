@@ -69,12 +69,14 @@ class CompetitionEvent(models.Model):
     例如：第十五届蓝桥杯、2024年ACM校赛
     """
     STATUS_CHOICES = (
-        ('active', '进行中'),
-        ('reviewing', '审核/评奖中'),
-        ('archived', '已归档'),  # 归档即代表结束，释放非获奖数据
+        ('registration', '报名中'),  # 学生可以创建 Team, 提交状态为 submitted
+        ('screening', '初筛中'),  # 报名截止，管理员调用 review-shortlist
+        ('ongoing', '比赛进行中'),  # 初筛结束，入围团队正在准备作品或决赛
+        ('awarding', '评奖/审核中'),  # 比赛结束，管理员调用 review-award 录入奖项
+        ('archived', '已归档'),  # 全部结束，数据快照已生成
     )
 
-    # 关联基础模型 (你的 Competition)
+    # 关联基础模型
     competition = models.ForeignKey(
         'Competition',
         on_delete=models.CASCADE,

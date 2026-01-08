@@ -8,6 +8,7 @@ from userManage.permissions import IsAdminOrReadOnly
 class MyProfileView(generics.RetrieveUpdateAPIView):
     """
     仅允许查看和修改“当前登录用户”自己的档案
+    GET /user-profile/view/
     """
     serializer_class = ProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -20,6 +21,10 @@ class MyProfileView(generics.RetrieveUpdateAPIView):
 
 
 class ProfileSearchByFieldNameView(generics.ListAPIView):
+    """
+    通过姓名搜索用户
+    GET /user-profile/search/?real_name=张三
+    """
     serializer_class = ProfileSerializer
     permission_classes = [IsAdminOrReadOnly]
     queryset = Profile.objects.all().select_related('user')
@@ -30,3 +35,18 @@ class ProfileSearchByFieldNameView(generics.ListAPIView):
     # 2. 使用 filterset_fields 明确指定过滤字段
     # 默认就是精确查询
     filterset_fields = ['real_name']
+
+
+class ProfileRetrieveByUserIdView(generics.RetrieveAPIView):
+    """
+    通过 user_id (学号/工号) 获取该用户的档案详情
+    GET /user-profile/by-user-id/{user_id}/
+    """
+    queryset = Profile.objects.all().select_related('user')
+    serializer_class = ProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    # 指定查找字段为关联 User 模型的 user_id
+    lookup_field = 'user__user_id'
+    # URL 中的参数名，默认与 lookup_field 一致，我们可以简化它
+    lookup_url_kwarg = 'user_id'
