@@ -49,10 +49,23 @@ class TeamSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         user = self.context['request'].user
-        # 获取当前正在操作的实例（如果是创建，instance 为 None）
         instance = self.instance
 
-        # 只有在创建新团队时，才校验是否已经是其他队的队长
+        # 1. 获取当前操作中的成员列表（如果是 PATCH 请求且没传 members，则从实例中取）
+        # data.get('members') 获取的是请求中新传的成员
+        members = data.get('members')
+
+        # 2. 获取队长对象
+        # 创建时队长是当前用户；更新时如果 leader 是只读的，队长通常是 instance.leader
+        current_leader = instance.leader if instance else user
+
+        # 3. 校验逻辑：队长不能在成员列表中
+        if members and current_leader in members:
+            raise serializers.ValidationError({
+                "members": "队长已在团队中，无需重复添加到成员列表。"
+            })
+
+        # 4. “重复建队”校验
         if not instance:
             event = data.get('event')
             if Team.objects.filter(leader=user, event=event).exists():

@@ -117,38 +117,57 @@ class CompetitionEventViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='next-stage')
     def advance_stage(self, request, pk=None):
         """
-        管理员接口：将赛事推进到下一个阶段
-        逻辑：registration -> screening -> ongoing -> awarding -> (archived需调用专用接口)
+        管理员接口：将赛事推进到下一个阶段，并重置入围团队状态
         """
         event = self.get_object()
 
         status_messages = {
             'screening': '报名已截止，赛事进入初筛阶段，请关注审核结果。',
-            'ongoing': '恭喜！初筛已结束，赛事现已正式开启。',
+            'ongoing': '恭喜！初筛已结束，入围团队请重新提交参赛作品/资料。',  # 修改了话术
             'awarding': '比赛已结束，正在进行最后的成果审核与奖项录入。',
         }
 
-        # 定义状态流转顺序
         stage_flow = ['registration', 'screening', 'ongoing', 'awarding']
 
         if event.status not in stage_flow:
-            return Response({"detail": f"当前状态 [{event.status}] 不支持自动流转，请检查或手动归档"},
+            return Response({"detail": f"当前状态 [{event.status}] 不支持自动流转"},
                             status=status.HTTP_400_BAD_REQUEST)
 
         current_index = stage_flow.index(event.status)
 
-        # 检查是否还有下一阶段
         if current_index < len(stage_flow) - 1:
             next_status = stage_flow[current_index + 1]
+
+            # 使用事务保证赛事状态和团队状态同步更新
+            if event.status != 'registration':
+                with transaction.atomic():
+                    # 1. 识别并锁定“晋级名单”
+                    # 注意：必须在修改状态前先获取这个 QuerySet
+                    passed_teams = event.teams.filter(status='shortlisted')
+                    passed_count = passed_teams.count()
+
+                    # 获取晋级名单的 ID 列表，防止后续 update 影响过滤结果
+                    passed_ids = list(passed_teams.values_list('id', flat=True))
+
+                    # 2. 淘汰逻辑：
+                    # 只要不在晋级名单里的，全部改为 ended
+                    # 这样 draft, submitted, rejected 且未被管理员标记为 shortlisted 的人都会被淘汰
+                    event.teams.exclude(id__in=passed_ids).update(status='ended')
+
+                    # 3. 晋级逻辑：
+                    # 将名单内的人员状态从 shortlisted 重置为 draft，开启下一轮提交
+                    event.teams.filter(id__in=passed_ids).update(status='draft')
+
+            # 更新赛事阶段
             event.status = next_status
             event.save()
 
-            # 发送全员通知
+            # 3. 发送全员通知
             if next_status in status_messages:
                 self._notify_all_participants(event, status_messages[next_status])
 
             return Response({
-                "detail": f"赛事阶段已更新为: {event.get_status_display()}",
+                "detail": f"赛事已进入: {event.get_status_display()}。已重置 {passed_count if 'passed_count' in locals() else 0} 个入围团队为草稿状态。",
                 "current_status": event.status
             })
         else:

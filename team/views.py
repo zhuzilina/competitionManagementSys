@@ -102,8 +102,8 @@ class TeamViewSet(viewsets.ModelViewSet):
         data: {"action": "approve" or "reject", "reason": "可选理由"}
         """
         team = self.get_object()
-        if team.event.status != 'screening':
-            return Response({"detail": "赛事不在初筛阶段"}, status=400)
+        # if team.event.status != 'screening':
+        #     return Response({"detail": "赛事不在初筛阶段"}, status=400)
 
         if not self.is_comp_admin_user(request.user):
             return Response({"detail": "权限不足"}, status=status.HTTP_403_FORBIDDEN)
@@ -190,7 +190,6 @@ class TeamViewSet(viewsets.ModelViewSet):
                     certificate=new_cert,
                     award_level=team.applied_award_level,
                     award_date=timezone.now().date(),
-                    team_name_snapshot=team.name,
                     creator=request.user
                 )
                 new_award.participants.set([team.leader] + list(team.members.all()))
@@ -266,4 +265,33 @@ class TeamViewSet(viewsets.ModelViewSet):
             "is_leader": is_leader,
             "is_member": is_member,
             "can_create": not is_leader  # 方便前端直接判断是否显示“创建团队”按钮
+        })
+
+    @action(detail=True, methods=['post'], url_path='submit-registration')
+    def submit_registration(self, request, pk=None):
+        """
+        队长接口：将团队状态从 draft 或 rejected 改为 submitted
+        POST /team/info/{id}/submit-registration/
+        """
+        team = self.get_object()
+
+        # 1. 权限校验
+        if team.leader != request.user:
+            return Response({"detail": "仅限队长提交报名信息"}, status=status.HTTP_403_FORBIDDEN)
+
+        # 2. 状态校验：只有草稿和被驳回的状态允许重新提交
+        if team.status not in ['draft', 'rejected']:
+            return Response(
+                {"detail": f"当前状态为 {team.get_status_display()}，无需重复提交报名。"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3. 执行流转
+        team.status = 'submitted'
+        team.save()
+
+        return Response({
+            "status": team.status,
+            "status_display": team.get_status_display(),
+            "detail": "报名信息已成功提交，请等待初筛。"
         })
