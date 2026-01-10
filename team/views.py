@@ -1,8 +1,12 @@
+import io
 import os
+import zipfile
 
 from django.db import transaction
 from django.db.models import Q
+from django.http import FileResponse
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 from notifications.signals import notify
 from rest_framework import viewsets, permissions, status, serializers
 from rest_framework.decorators import action
@@ -12,6 +16,7 @@ from award.models import Award
 from certificate.models import Certificate
 from team.models import Team
 from .serializers import TeamSerializer, TeamFileUploadSerializer
+from competitions.models import CompetitionEvent
 
 
 class TeamViewSet(viewsets.ModelViewSet):
@@ -27,14 +32,20 @@ class TeamViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """查询优化：学生看自己的队，老师看指导的队，管理员看全部"""
         user = self.request.user
-        if self.is_comp_admin_user(user):
-            return Team.objects.all()
+        # 基础查询集：使用 select_related 关联一对一，prefetch_related 关联多对多
+        queryset = Team.objects.select_related(
+            'leader__profile',
+            'event'
+        ).prefetch_related(
+            'members__profile',
+            'teachers__profile'
+        )
 
-        # 返回用户身为队长、成员或指导老师的所有团队
-        return Team.objects.filter(
-            Q(leader=user) |
-            Q(members=user) |
-            Q(teachers=user)
+        if self.is_comp_admin_user(user):
+            return queryset
+
+        return queryset.filter(
+            Q(leader=user) | Q(members=user) | Q(teachers=user)
         ).distinct()
 
     @action(detail=True, methods=['patch'], url_path='upload-files')
@@ -294,4 +305,99 @@ class TeamViewSet(viewsets.ModelViewSet):
             "status": team.status,
             "status_display": team.get_status_display(),
             "detail": "报名信息已成功提交，请等待初筛。"
+        })
+
+    @action(detail=False, methods=['get'], url_path='export-works')
+    def export_works(self, request):
+        """
+        管理员接口：打包下载某个赛事所有入围团队的作品
+        GET /team/info/export-works/?event_id=1
+        """
+        # 1. 权限校验
+        if not self.is_comp_admin_user(request.user):
+            return Response({"detail": "仅限管理员操作"}, status=status.HTTP_403_FORBIDDEN)
+
+        event_id = request.query_params.get('event_id')
+        if not event_id:
+            return Response({"detail": "请提供 event_id"}, status=400)
+
+        # 2. 获取赛事并检查状态
+        try:
+            event = CompetitionEvent.objects.get(pk=event_id)
+        except (ImportError, CompetitionEvent.DoesNotExist):
+            return Response({"detail": "赛事不存在"}, status=404)
+
+        if event.status == 'archived':
+            return Response({"detail": "赛事已归档，无法导出"}, status=400)
+
+        # 3. 获取所有入围且有作品的团队
+        teams = Team.objects.filter(event=event, status='shortlisted').exclude(works='').only('name', 'works')
+
+        if not teams.exists():
+            return Response({"detail": "该赛事目前没有入围团队的作品可供下载"}, status=404)
+
+        # 4. 在内存中创建 Zip 文件
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for team in teams:
+                # 获取文件原始后缀
+                ext = os.path.splitext(team.works.name)[1]
+                # 清理队名中的非法字符（使用之前讨论的 get_valid_filename）
+                safe_team_name = get_valid_filename(team.name)
+                # 构造压缩包内的文件名：队名.后缀
+                zip_path = f"{safe_team_name}{ext}"
+
+                # 将文件写入压缩包
+                # team.works.open() 打开文件流
+                try:
+                    zip_file.writestr(zip_path, team.works.read())
+                except Exception as e:
+                    continue  # 容错处理：某个文件损坏则跳过
+
+        # 5. 返回文件流
+        buffer.seek(0)
+        filename = f"export_event{event_id}.zip"
+        response = FileResponse(buffer, content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=['post'], url_path='reset-to-draft')
+    def reset_to_draft(self, request, pk=None):
+        """
+        管理员接口：将已结束(ended)的团队重置为草稿(draft)
+        POST /team/info/{id}/reset-to-draft/
+        """
+        # 1. 权限校验
+        if not self.is_comp_admin_user(request.user):
+            return Response({"detail": "仅限管理员操作"}, status=status.HTTP_403_FORBIDDEN)
+
+        team = self.get_object()
+
+        # 2. 赛事状态校验：已归档的赛事不允许再变动团队状态
+        if team.event.status == 'archived':
+            return Response({"detail": "赛事已归档，无法修改团队状态"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. 团队当前状态校验：只有 ended 状态支持重置（也可以根据需求加入 rejected）
+        if team.status != 'ended':
+            return Response(
+                {"detail": f"当前团队状态为 {team.get_status_display()}，只有已结束的团队可以重置。"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 4. 执行状态流转
+        team.status = 'draft'
+        team.save()
+
+        # 5. 发送通知告知队长
+        notify.send(
+            sender=request.user,
+            recipient=team.leader,
+            verb=f'管理员已重置您的团队“{team.name}”状态为草稿，您可以重新编辑并提交报名。',
+            target=team
+        )
+
+        return Response({
+            "detail": "团队已重置为草稿状态",
+            "status": team.status,
+            "team": TeamSerializer(team).data
         })

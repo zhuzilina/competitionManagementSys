@@ -212,20 +212,37 @@ class CompetitionEventViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 # --- A. 统计并持久化数据 ---
-                # 统计参赛团队总数 (在删除之前统计)
-                event.final_participants_count = event.teams.count()
+                # 1. 获取所有【正式参赛】的团队 (排除草稿和被驳回的)
+                # 只有这些团队的人员才算作正式参赛人数
+                valid_teams = event.teams.filter(
+                    status__in=['shortlisted', 'awarded', 'ended']
+                )
 
-                # 统计获奖人数 (查询已生成的正式 Award 记录数)
-                # 假设 Award 模型有一个 event 外键关联到 CompetitionEvent
-                event.final_winners_count = Award.objects.filter(event=event).count()
+                # 2. 统计真实参赛人数 (队长 + 成员 并去重)
+                # 使用 values_list 获取所有队长ID和成员ID，然后用 set 去重
+                leader_ids = valid_teams.values_list('leader_id', flat=True)
+                member_ids = valid_teams.values_list('members__id', flat=True)
+
+                # 合并两个 QuerySet 的结果并去重 (排除 None)
+                total_participant_ids = set(list(leader_ids) + list(member_ids))
+                if None in total_participant_ids:
+                    total_participant_ids.remove(None)
+
+                event.final_participants_count = len(total_participant_ids)
+
+                # 3. 统计获奖人数 (直接从已生成的 Award 记录中统计人员去重)
+                # 这样比统计 Team 更准确，因为 Award 记录了最终确定的名单
+                awarded_users = get_user_model().objects.filter(
+                    Q(awards_as_participant__event=event)
+                ).distinct()
+                event.final_winners_count = awarded_users.count()
 
                 # --- B. 更新赛事状态 ---
                 event.status = 'archived'
                 event.save()
 
                 # --- C. 自动销毁关联的所有团队记录 ---
-                # 这里的 delete() 会触发 django-cleanup 自动清理物理文件
-                # 同时也释放了数据库空间。由于之前已经生成了 Award，获奖数据是安全的。
+                # 警告：由于 C 操作会级联删除 Team，务必确保 A 操作在 C 之前完成
                 event.teams.all().delete()
 
             return Response({

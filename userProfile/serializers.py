@@ -1,3 +1,4 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from .models import Profile
 
@@ -24,3 +25,12 @@ class ProfileSerializer(serializers.ModelSerializer):
         if instance.user.groups.filter(name='Student').exists():
             ret.pop('title', None)
         return ret
+
+
+class UserDetailSerializer(serializers.ModelSerializer):
+    # 通过 related_name='profile' 嵌套你现有的序列化器
+    profile = ProfileSerializer(read_only=True)
+
+    class Meta:
+        model = get_user_model()
+        fields = ['user_id', 'username', 'profile']

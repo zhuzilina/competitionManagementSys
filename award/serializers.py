@@ -2,8 +2,8 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from certificate.models import Certificate
+from userProfile.serializers import UserDetailSerializer
 from .models import Award
-from userManage.serializers import UserSerializer
 
 User = get_user_model()
 
@@ -42,8 +42,9 @@ class AwardSerializer(serializers.ModelSerializer):
         slug_field='user_id'
     )
 
-    participant_details = UserSerializer(source='participants', many=True, read_only=True)
-    instructor_details = UserSerializer(source='instructors', many=True, read_only=True)
+    # --- 4. 参与者 & 指导老师 (Profile 详情展示) ---
+    participant_details = UserDetailSerializer(source='participants', many=True, read_only=True)
+    instructor_details = UserDetailSerializer(source='instructors', many=True, read_only=True)
 
     class Meta:
         model = Award

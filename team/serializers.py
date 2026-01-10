@@ -1,4 +1,10 @@
+import os
+import time
+
+from django.utils.text import get_valid_filename
 from rest_framework import serializers
+
+from userProfile.serializers import UserDetailSerializer
 from .models import Team
 from django.contrib.auth import get_user_model
 
@@ -6,70 +12,67 @@ User = get_user_model()
 
 
 class TeamSerializer(serializers.ModelSerializer):
-    # 显示字段
-    leader_name = serializers.ReadOnlyField(source='leader.username')
+    # 基础信息显示
+    leader_user_id = serializers.ReadOnlyField(source='leader.user_id')
     event_name = serializers.ReadOnlyField(source='event.name')
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
-    # 文件字段在读时会返回 URL，在写时接收文件流
-    # 设置为 required=False 允许在最初创建时不传，后续通过 PATCH 补传
-    works = serializers.FileField(required=False, allow_null=True)
-    attachment = serializers.FileField(required=False, allow_null=True)
+    # 展开详细信息（只读，用于前端渲染列表或详情）
+    leader_detail = UserDetailSerializer(source='leader', read_only=True)
+    members_detail = UserDetailSerializer(source='members', many=True, read_only=True)
+    teachers_detail = UserDetailSerializer(source='teachers', many=True, read_only=True)
 
-    # 使用 user_id 而不是默认的 pk 进行关联录入
+    # 录入字段（写时使用 user_id 列表）
     members = serializers.SlugRelatedField(
-        required=False,
-        many=True,
-        queryset=User.objects.all(),
-        slug_field='user_id'  # 假设你的 User 模型中存储学号的字段名是 user_id
+        required=False, many=True, queryset=User.objects.all(), slug_field='user_id'
     )
     teachers = serializers.SlugRelatedField(
-        required=False,
-        many=True,
-        queryset=User.objects.all(),
-        slug_field='user_id'
+        required=False, many=True, queryset=User.objects.all(), slug_field='user_id'
     )
 
     class Meta:
         model = Team
         fields = [
-            'id', 'event', 'event_name', 'name', 'leader', 'leader_name',
-            'members', 'teachers', 'works', 'applied_award_level','temp_cert_no',
+            'id', 'event', 'event_name', 'name',
+            'leader', 'leader_user_id', 'leader_detail',
+            'members', 'members_detail',
+            'teachers', 'teachers_detail',
+            'works', 'applied_award_level', 'temp_cert_no',
             'attachment', 'status', 'status_display', 'converted_award'
         ]
-        # leader 是自动绑定的，status 和 converted_award 由后端逻辑控制
         read_only_fields = ['leader', 'status', 'converted_award']
 
+    def validate_works(self, value):
+        """处理作品上传重命名：队名.后缀"""
+        if value and self.instance:
+            ext = os.path.splitext(value.name)[1]
+            # 使用 django 工具清理非法字符，保留中文
+            safe_name = get_valid_filename(self.instance.name)
+            value.name = f"{safe_name}{ext}"
+        return value
+
     def validate_teachers(self, value):
-        """确保加入 teachers 字段的用户确实拥有 Teacher 角色"""
+        """确保老师角色校验"""
         for user in value:
             if not user.groups.filter(name='Teacher').exists():
-                raise serializers.ValidationError(f"用户 {user.username} 不是老师，不能作为指导老师。")
+                raise serializers.ValidationError(f"用户 {user.user_id} 不是指导老师角色。")
         return value
 
     def validate(self, data):
         user = self.context['request'].user
         instance = self.instance
 
-        # 1. 获取当前操作中的成员列表（如果是 PATCH 请求且没传 members，则从实例中取）
-        # data.get('members') 获取的是请求中新传的成员
+        # 校验：队长不能在成员列表中
         members = data.get('members')
-
-        # 2. 获取队长对象
-        # 创建时队长是当前用户；更新时如果 leader 是只读的，队长通常是 instance.leader
         current_leader = instance.leader if instance else user
-
-        # 3. 校验逻辑：队长不能在成员列表中
         if members and current_leader in members:
-            raise serializers.ValidationError({
-                "members": "队长已在团队中，无需重复添加到成员列表。"
-            })
+            raise serializers.ValidationError({"members": "队长已在团队中，无需重复添加。"})
 
-        # 4. “重复建队”校验
+        # 重复建队校验（仅创建时）
         if not instance:
             event = data.get('event')
             if Team.objects.filter(leader=user, event=event).exists():
-                raise serializers.ValidationError({"detail": "在该竞赛活动中，你已经创建过团队了。"})
+                raise serializers.ValidationError({"detail": "您已在该赛事中创建过团队。"})
 
         return data
 
@@ -88,3 +91,23 @@ class TeamFileUploadSerializer(serializers.ModelSerializer):
         if 'attachment' in validated_data:
             instance.status = 'submitted'
         return super().update(instance, validated_data)
+
+    def validate_works(self, value):
+        if value:
+            # 1. 获取团队名称 (从 self.instance 获取，因为这是 PATCH 操作)
+            team_name = self.instance.name
+
+            # 2. 获取原始文件的后缀名
+            ext = os.path.splitext(value.name)[1]  # 例如 '.pdf' 或 '.zip'
+
+            # 3.清洗文件名
+            clean_name = get_valid_filename(team_name)
+
+            # 3. 构造新的文件名： 团队名.后缀
+            # 注意：为了防止文件名包含非法字符，可以使用 django.utils.text.slugify 或简单替换
+            new_filename = f"{clean_name}_{int(time.time())}{ext}"
+
+            # 4. 重新赋值文件名
+            value.name = new_filename
+
+        return value

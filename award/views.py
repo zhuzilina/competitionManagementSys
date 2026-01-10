@@ -17,18 +17,30 @@ from django.db.models.functions import ExtractYear
 User = get_user_model()
 
 class AwardViewSet(viewsets.ModelViewSet):
-    queryset = Award.objects.all().select_related('competition', 'certificate').prefetch_related('participants', 'instructors')
+    # 1. select_related 针对 ForeignKey 和 OneToOne
+    # 2. prefetch_related 针对 ManyToMany，并使用 Prefetch 对象深入关联 profile
+    queryset = Award.objects.all()
     serializer_class = AwardSerializer
     permission_classes = [IsCompAdminOrReadOnly]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        # 深度优化：一次性取出所有必要数据
+        queryset = self.queryset.select_related(
+            'competition',
+            'certificate',
+            'creator__profile'
+        ).prefetch_related(
+            'participants__profile',  # 预加载参与者的档案
+            'participants__groups',  # 预加载组信息以便 ProfileSerializer 里的 get_role_name 使用
+            'instructors__profile',  # 预加载老师的档案
+            'instructors__groups'
+        )
+
         user_query_id = self.request.query_params.get('user_id')
 
-        # 如果传了 user_id='me'，自动替换为当前登录用户 ID
         if user_query_id == 'me':
             if self.request.user.is_authenticated:
-                user_query_id = self.request.user.user_id  # 假设你的字段名是这个
+                user_query_id = self.request.user.user_id
             else:
                 return Award.objects.none()
 
