@@ -16,9 +16,10 @@ class Profile(models.Model):
     real_name = models.CharField(max_length=50, verbose_name="真实姓名")
     phone = models.CharField(max_length=11, verbose_name="手机号", blank=True, null=True)
     email = models.EmailField(verbose_name="邮箱地址", blank=True, null=True)
+    qq = models.CharField(max_length=11, verbose_name="QQ", blank=True, null=True)
 
     # 学业/组织信息
-    department = models.CharField(max_length=100, verbose_name="院系")
+    college = models.CharField(max_length=100, verbose_name="学院", blank=True, null=True)
     major = models.CharField(max_length=100, verbose_name="专业", blank=True, null=True)
     clazz = models.CharField(max_length=50, verbose_name="班级", blank=True, null=True)
 
@@ -30,6 +31,7 @@ class Profile(models.Model):
         blank=True,
         null=True
     )
+    department = models.CharField(max_length=100, verbose_name="院系", blank=True, null=True)
 
     class Meta:
         db_table = 'sys_user_profile'

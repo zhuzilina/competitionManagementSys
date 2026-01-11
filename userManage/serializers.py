@@ -69,58 +69,75 @@ class UserSerializer(serializers.ModelSerializer):
 
 # 定义注册的序列化器
 class RegisterSerializer(serializers.ModelSerializer):
-    # 密码确认字段
+    # --- 账号相关 ---
     re_password = serializers.CharField(write_only=True, required=True)
-    # 角色字段
-    role_names = serializers.ListField(child=serializers.CharField(),write_only=True, required=False)
-    # 档案资料字段
+    role_names = serializers.ListField(child=serializers.CharField(), write_only=True, required=False)
+
+    # --- Profile 相关字段 (write_only=True 确保这些字段只用于输入) ---
     real_name = serializers.CharField(write_only=True, required=True)
-    department = serializers.CharField(write_only=True, required=True)
+    phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    qq = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    college = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    major = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    clazz = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    # 职业信息字段
+    title = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    department = serializers.CharField(write_only=True, required=False)  # 假设部门是必填的
 
     class Meta:
         model = User
-        fields = ['user_id', 'username', 'password', 're_password', 'real_name', 'department', 'role_names']
+        fields = [
+            'user_id', 'username', 'password', 're_password', 'role_names',
+            'real_name', 'phone', 'email', 'qq','college', 'major', 'clazz', 'title', 'department'
+        ]
         extra_kwargs = {
-            'password':{'write_only':True},
+            'password': {'write_only': True},
         }
 
     def validate(self, attrs):
         if attrs['password'] != attrs['re_password']:
-            raise serializers.ValidationError({"password":"两次输入的密码不一致"})
+            raise serializers.ValidationError({"password": "两次输入的密码不一致"})
         return attrs
 
     def create(self, validated_data):
-        # 移除不需要存入User模型的字段
+        # 1. 提取账号信息
         validated_data.pop('re_password')
-        real_name = validated_data.pop('real_name')
-        department = validated_data.pop('department')
         role_names = validated_data.pop('role_names', [])
 
-        # 创建用户(保证原子性）
+        # 2. 提取 Profile 信息
+        # 使用 pop 将所有 profile 字段从 validated_data 中分离出来
+        profile_fields = ['real_name', 'phone', 'email','qq', 'college', 'major', 'clazz', 'title', 'department']
+        profile_data = {field: validated_data.pop(field, None) for field in profile_fields}
+
         with transaction.atomic():
+            # 3. 创建 User
             user = User.objects.create_user(
                 user_id=validated_data['user_id'],
-                username=validated_data.get('username',validated_data['user_id']),# 默认为user_id
+                username=validated_data.get('username', validated_data['user_id']),
                 password=validated_data['password']
             )
-            # 创建对应的Profile信息
-            Profile.objects.create(
-                user=user,
-                real_name=real_name,
-                department=department
-            )
 
-            # 绑定角色
+            # 4. 处理角色逻辑
             if role_names:
                 groups = Group.objects.filter(name__in=role_names)
                 user.groups.set(groups)
             else:
-                # 默认给一个学生角色
                 default_group, _ = Group.objects.get_or_create(name='Student')
                 user.groups.add(default_group)
+                role_names = ['Student']  # 确保逻辑同步
+
+            # 5. 职业信息留空逻辑：如果是 Student 角色，清空职业信息
+            if 'Student' in role_names:
+                profile_data['title'] = None
+                # 如果业务要求 Student 的 department 也为空，取消下面注释：
+                profile_data['department'] = None
+
+            # 6. 创建 Profile
+            Profile.objects.create(user=user, **profile_data)
 
         return user
-
 
 class MenuTreeSerializer(serializers.ModelSerializer):
     children = serializers.SerializerMethodField()
