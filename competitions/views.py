@@ -53,6 +53,7 @@ class CompetitionLevelViewSet(viewsets.ModelViewSet):
     # 设置权限
     permission_classes = [IsCompAdminOrReadOnly]
     serializer_class = CompetitionLevelSerializer
+    pagination_class = None
 
 
 class CompetitionCategoryViewSet(viewsets.ModelViewSet):
@@ -60,6 +61,7 @@ class CompetitionCategoryViewSet(viewsets.ModelViewSet):
     # 设置权限
     permission_classes = [IsCompAdminOrReadOnly]
     serializer_class = CompetitionCategorySerializer
+    pagination_class = None
 
 
 class CompetitionEventViewSet(viewsets.ModelViewSet):
