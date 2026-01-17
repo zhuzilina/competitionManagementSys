@@ -3,6 +3,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 
+from userManage.config import DEFAULT_PASSWORD_PLAIN, DEFAULT_PASSWORD_HASH
 from userManage.models import Menu
 from userProfile.models import Profile
 User = get_user_model()
@@ -75,16 +76,16 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     # --- Profile 相关字段 (write_only=True 确保这些字段只用于输入) ---
     real_name = serializers.CharField(write_only=True, required=True)
-    phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
-    qq = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    phone = serializers.CharField(write_only=True, required=False, allow_blank=True,allow_null=True)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True,allow_null=True)
+    qq = serializers.CharField(write_only=True, required=False, allow_blank=True,allow_null=True)
     college = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    major = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    clazz = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    major = serializers.CharField(write_only=True, required=False, allow_blank=True,allow_null=True)
+    clazz = serializers.CharField(write_only=True, required=False, allow_blank=True,allow_null=True)
 
     # 职业信息字段
-    title = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    department = serializers.CharField(write_only=True, required=False)  # 假设部门是必填的
+    title = serializers.CharField(write_only=True, required=False, allow_blank=True,allow_null=True)
+    department = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = User
@@ -105,6 +106,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         # 1. 提取账号信息
         validated_data.pop('re_password')
         role_names = validated_data.pop('role_names', [])
+        password = validated_data.pop('password') # 提取密码
 
         # 2. 提取 Profile 信息
         # 使用 pop 将所有 profile 字段从 validated_data 中分离出来
@@ -113,20 +115,38 @@ class RegisterSerializer(serializers.ModelSerializer):
 
         with transaction.atomic():
             # 3. 创建 User
-            user = User.objects.create_user(
+            user = User(
                 user_id=validated_data['user_id'],
-                username=validated_data.get('username', validated_data['user_id']),
-                password=validated_data['password']
+                username=validated_data['user_id'],
             )
 
+            # 3. 密码逻辑优化
+            if password == DEFAULT_PASSWORD_PLAIN:
+                # 直接使用预存的哈希，跳过计算过程
+                user.password = DEFAULT_PASSWORD_HASH
+            else:
+                # 正常加密新密码
+                user.set_password(password)
+
+            user.save()
+            # 4. 处理角色逻辑
             # 4. 处理角色逻辑
             if role_names:
                 groups = Group.objects.filter(name__in=role_names)
-                user.groups.set(groups)
+                if groups.exists():
+                    user.groups.set(groups)
+                    # 更新实际的角色列表用于下文判断
+                    role_names = list(groups.values_list('name', flat=True))
+                else:
+                    # 如果填了角色但数据库没找到，是维持现状还是设为默认？
+                    # 这里建议设为 Student 以防权限落空
+                    student_group, _ = Group.objects.get_or_create(name='Student')
+                    user.groups.add(student_group)
+                    role_names = ['Student']
             else:
-                default_group, _ = Group.objects.get_or_create(name='Student')
-                user.groups.add(default_group)
-                role_names = ['Student']  # 确保逻辑同步
+                student_group, _ = Group.objects.get_or_create(name='Student')
+                user.groups.add(student_group)
+                role_names = ['Student']
 
             # 5. 职业信息留空逻辑：如果是 Student 角色，清空职业信息
             if 'Student' in role_names:

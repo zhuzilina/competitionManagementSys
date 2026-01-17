@@ -14,7 +14,7 @@ class Profile(models.Model):
 
     # 基础信息
     real_name = models.CharField(max_length=50, verbose_name="真实姓名")
-    phone = models.CharField(max_length=11, verbose_name="手机号", blank=True, null=True)
+    phone = models.CharField(max_length=20, verbose_name="手机号", blank=True, null=True)
     email = models.EmailField(verbose_name="邮箱地址", blank=True, null=True)
     qq = models.CharField(max_length=11, verbose_name="QQ", blank=True, null=True)
 

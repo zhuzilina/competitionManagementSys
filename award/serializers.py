@@ -5,7 +5,7 @@ from certificate.models import Certificate
 from competitions.models import Competition
 from competitions.serializers import CompetitionDetailSerializer
 from userProfile.serializers import UserDetailSerializer
-from .models import Award
+from .models import Award, AwardImportItem
 
 User = get_user_model()
 
@@ -86,3 +86,9 @@ class AwardReportSerializer(serializers.Serializer):
     clazz = serializers.CharField()
     title = serializers.CharField()  # 职称
     awards = AwardInfoSerializer(many=True)  # 该成员关联的所有奖项
+
+
+class AwardImportItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AwardImportItem
+        fields = '__all__' # 或者指定你需要的字段

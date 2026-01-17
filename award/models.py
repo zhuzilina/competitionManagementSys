@@ -77,6 +77,7 @@ class AwardImportTask(models.Model):
         ('finished', '已完成'),  # 全部入库
         ('failed', '失败'),
     )
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
     creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     file_name = models.CharField(max_length=255, verbose_name="原始文件名")

@@ -40,7 +40,7 @@ class Competition(models.Model):
     title = models.CharField(max_length=255, verbose_name="竞赛名称")
     description = models.TextField(verbose_name="竞赛简介", blank=True, null=True)
     year = models.IntegerField(verbose_name="举办年份")
-    uri = models.CharField(max_length=8182, verbose_name="竞赛官网")
+    uri = models.CharField(max_length=8182, verbose_name="竞赛官网", blank=True, null=True)
 
     # 使用外键关联动态表
     category = models.ForeignKey(
@@ -59,7 +59,6 @@ class Competition(models.Model):
         max_length=20,
         verbose_name="竞赛规模",
         choices=SCALE_CHOICES,
-        default=SCALE_CHOICES[0][0],
     )
     # 审计信息
     creator = models.ForeignKey(

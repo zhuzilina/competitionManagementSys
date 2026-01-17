@@ -14,7 +14,7 @@ class Command(BaseCommand):
         call_command('migrate')
 
         # 2. 创建角色组
-        roles = ['CompetitionAdministrator', 'Student', 'Teacher']
+        roles = ['CompetitionAdministrator', 'Student', 'Teacher','Administrator']
         for role_name in roles:
             group, created = Group.objects.get_or_create(name=role_name)
             if created:
@@ -25,10 +25,10 @@ class Command(BaseCommand):
         # 3. 创建不同角色的用户
         # 定义用户信息：(学工号user_id，用户名, 密码, 组名, 是否是超级用户)
         users_to_create = [
-            ('23101100526','23101100526', 'admin123', None, True),
-            ('23101100527','23101100527', 'pass123', 'CompetitionAdministrator', False),
-            ('23101100528','23101100528', 'pass123', 'Student', False),
-            ('23101100529','23101100529', 'pass123', 'Teacher', False),
+            ('admin1','admin1', 'pass123', None, True),
+            ('admin2','admin2', 'pass123', 'Administrator', False),
+            ('comp3','comp3', 'pass123', 'CompetitionAdministrator', False),
+            ('comp4','comp4', 'pass123', 'CompetitionAdministrator', False),
         ]
 
         for uid, uname, pwd, gname, is_staff in users_to_create:

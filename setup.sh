@@ -5,7 +5,16 @@ set -e
 
 echo "开始初始化项目..."
 
-# 1. 创建虚拟环境 (如果不存在)
+# 1. 初始化数据库
+{
+  echo "正在初始化数据库..."
+  docker compose up -d --wait
+} || {
+  echo "数据库初始化失败"
+  exit 1
+}
+
+# 2. 创建虚拟环境 (如果不存在)
 if [ ! -d ".venv" ]; then
     echo "正在创建 Python 虚拟环境..."
     python3 -m venv .venv
@@ -14,20 +23,21 @@ else
     echo "虚拟环境 .venv 已存在，跳过创建。"
 fi
 
-# 2. 激活虚拟环境
+# 3. 激活虚拟环境
 echo "正在激活虚拟环境..."
 source .venv/bin/activate
 
-# 3. 升级 pip 并安装依赖
+# 4. 升级 pip 并安装依赖
 echo "正在安装/更新依赖项 (requirements.txt)..."
 pip install --upgrade pip
 if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt
 else
     echo "警告: 未找到 requirements.txt，请确保依赖已手动安装。"
+    exit 1
 fi
 
-# 4. 执行 Django 初始化脚本
+# 5. 执行 Django 初始化脚本
 echo "正在运行 Django 初始化指令..."
 if [ -f "manage.py" ]; then
     # 这里会执行你之前编写的自定义命令
@@ -39,5 +49,6 @@ fi
 
 echo "------------------------------------------------"
 echo "项目初始化成功！"
+echo "请运行 'celery -A competitionManagementSys worker -l info -P eventlet'"
 echo "请运行 'source .venv/bin/activate' 启动开发环境。"
 echo "------------------------------------------------"

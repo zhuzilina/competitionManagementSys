@@ -94,8 +94,12 @@ WSGI_APPLICATION = 'competitionManagementSys.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'my_project_db',
+        'USER': 'user',
+        'PASSWORD': 'password123',
+        'HOST': '127.0.0.1',  # 如果 Django 在宿主机运行
+        'PORT': '3306',
     }
 }
 
@@ -125,8 +129,8 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES':(
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10
+    # 'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    # 'PAGE_SIZE': 10
 }
 from datetime import timedelta
 
@@ -160,3 +164,13 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+redis_host = os.getenv('REDIS_HOST', '127.0.0.1')
+# 如果没有设置密码
+CELERY_BROKER_URL = f'redis://{redis_host}:6379/0'
+CELERY_RESULT_BACKEND = f'redis://{redis_host}:6379/0'
+
+# 如果你在 compose 里设置了密码 (requirepass password123)
+# CELERY_BROKER_URL = 'redis://:password123@redis:6379/0'
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'

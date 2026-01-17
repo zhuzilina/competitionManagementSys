@@ -1,26 +1,32 @@
+import os
 import re
+from datetime import datetime
 
 import django_filters
+from celery.result import AsyncResult
+from django.core.files.storage import default_storage
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from django.contrib.auth import get_user_model
 from django.http import HttpResponse
 from rest_framework import viewsets, filters
-from datetime import datetime
 from django.db.models import Prefetch
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
+from competitionManagementSys import settings
 from competitions.models import Competition
-from .models import Award
-from .serializers import AwardSerializer
+from .models import Award, AwardImportTask, AwardImportItem
+from .serializers import AwardSerializer, AwardImportItemSerializer
 from .serializers import AwardReportSerializer
 from userManage.permissions import IsCompAdminOrReadOnly,IsCompAdmin
 from django.db.models import Count,Q,F
 from django.db.models.functions import ExtractYear
+from .tasks import process_award_import_task
 
 User = get_user_model()
 
@@ -126,101 +132,6 @@ class AwardViewSet(viewsets.ModelViewSet):
         instance.delete()  # 删除获奖记录
         if cert:
             cert.delete()
-
-    @action(detail=False, methods=['post'], url_path='batch-import')
-    def batch_import(self, request):
-        file_data = request.data.get('data')  # 假设前端传回的是解析好的 JSON 列表
-        if not file_data:
-            return Response({"error": "无有效数据"}, status=400)
-
-        results = {
-            "success_count": 0,
-            "error_count": 0,
-            "errors": []  # 记录具体哪一行、因为什么报错
-        }
-
-        # 分隔符正则：中英文逗号、分号、顿号、空格
-        delimiters = r'[，,；;、\s]+'
-
-        with transaction.atomic():
-            for index, item in enumerate(file_data):
-                line_num = index + 1
-                try:
-                    # 1. 匹配竞赛
-                    comp_name = item.get('competition_name', '').strip()
-                    comp = Competition.objects.filter(title=comp_name).first()
-                    if not comp:
-                        raise ValueError(f"竞赛 '{comp_name}' 不存在")
-
-                    # 2. 解析人员数据 (学生和老师)
-                    student_ids = self._parse_users(item.get('participants', ''), delimiters)
-                    teacher_ids = self._parse_users(item.get('instructors', ''), delimiters)
-
-                    # 3. 创建获奖记录
-                    award = Award.objects.create(
-                        competition=comp,
-                        award_level=item.get('award_level'),
-                        award_date=item.get('award_date'),
-                        creator=request.user
-                    )
-                    award.participants.set(student_ids)
-                    award.instructors.set(teacher_ids)
-
-                    results["success_count"] += 1
-
-                except Exception as e:
-                    results["error_count"] += 1
-                    results["errors"].append({
-                        "line": line_num,
-                        "reason": str(e)
-                    })
-                    # 如果要求“原子性”，这里可以直接 raise 撤销全部；
-                    # 如果要求“能导多少是多少”，则 continue
-
-        return Response(results)
-
-    def _parse_users(self, raw_str, delimiters):
-        """
-        解析人员字符串，支持：
-        新版：张三23101100527
-        旧版：张三
-        """
-        if not raw_str:
-            return []
-
-        # 按分隔符切分
-        names = re.split(delimiters, str(raw_str))
-        user_ids = []
-
-        for part in names:
-            part = part.strip()
-            if not part: continue
-
-            # 使用正则提取：末尾的连续数字作为 ID，前面的作为名字
-            # 兼容：张三23101100527 或直接 张三
-            match = re.match(r'^([^\d]+)(\d+)$', part)
-
-            if match:
-                # --- 新版逻辑：带学工号 ---
-                name, uid = match.groups()
-                user = User.objects.filter(user_id=uid).first()
-                if not user:
-                    raise ValueError(f"用户 ID '{uid}'({name}) 未在系统中找到")
-                user_ids.append(user.id)
-            else:
-                # --- 旧版逻辑：纯名字 ---
-                # 关联到 UserProfile 的 real_name
-                users = User.objects.filter(profile__real_name=part)
-                count = users.count()
-                if count == 0:
-                    raise ValueError(f"找不到名为 '{part}' 的用户")
-                elif count > 1:
-                    # 获取他们的部门信息以便提示
-                    depts = [u.profile.department for u in users if hasattr(u, 'profile')]
-                    raise ValueError(f"发现重名用户 '{part}' ({' / '.join(depts)})，请使用 '姓名+学号' 导入")
-                user_ids.append(users.first().id)
-
-        return user_ids
 
 
 class AwardReportView(APIView):
@@ -421,12 +332,165 @@ class AwardStatisticsView(APIView):
 
 
 class AwardImportViewSet(viewsets.ModelViewSet):
+    queryset = AwardImportTask.objects.all()
+    @action(detail=False, methods=['post'])
+    def upload(self, request):
+        """
+        第一步：上传 Excel，创建任务，触发异步解析
+        """
+        file = request.FILES.get('file')
+        if not file:
+            return Response({"error": "请上传文件"}, status=400)
+
+        # 1. 保存文件
+        # 建议重命名文件防止冲突，例如加时间戳
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        save_path = f'imports/awards/{timestamp}_{file.name}'
+        path = default_storage.save(save_path, file)
+        full_path = os.path.join(settings.MEDIA_ROOT, path)  # 获取绝对路径供 pandas 读取
+
+        # 2. 创建任务记录
+        task_record = AwardImportTask.objects.create(
+            creator=request.user,
+            file_name=full_path,  # 存绝对路径方便读取，或存相对路径并在 Task 中处理
+            status='pending'
+        )
+
+        # 3. 触发异步任务
+        async_task = process_award_import_task.delay(task_record.id)
+        # 保存id到数据库
+        task_record.celery_task_id = async_task.id
+        task_record.save()
+
+        return Response({
+            "id": task_record.id,
+            "status": "pending",
+            "message": "文件已上传，正在后台解析数据..."
+        })
+
+    @action(detail=True, methods=['get'])
+    def status(self, request, pk=None):
+        task = self.get_object()
+
+        # 获取任务在数据库中的基础状态
+        response_data = {
+            "status": task.status,
+            "progress": 0
+        }
+
+        # 如果任务有关联的 Celery ID，去查询实时进度
+        if task.celery_task_id:
+            res = AsyncResult(task.celery_task_id)
+
+            if res.state == 'PROGRESS':
+                # 正在处理中，获取 meta 里的进度
+                response_data["progress"] = res.info.get('progress', 0)
+            elif res.state == 'SUCCESS':
+                # 任务成功
+                response_data["progress"] = 100
+            elif res.state == 'FAILURE':
+                # 任务失败
+                response_data["status"] = 'failed'
+                response_data["error"] = str(res.info)
+
+        return Response(response_data)
+
+    @action(detail=True, methods=['get'])
+    def items(self, request, pk=None):
+        """
+        获取该任务下的所有解析项，支持过滤是否有效
+        GET /award/import/1/items/?is_valid=false
+        """
+        task = self.get_object()
+        items = task.items.all()
+
+        # 可选：增加简单的过滤，方便前端只看错误项
+        is_valid_filter = request.query_params.get('is_valid')
+        if is_valid_filter is not None:
+            is_valid_bool = is_valid_filter.lower() == 'true'
+            items = items.filter(is_valid=is_valid_bool)
+
+        serializer = AwardImportItemSerializer(items, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='update-item')
+    def update_item(self, request, pk=None):
+        """
+        修正单条解析项数据
+        URL: POST /award/import/{task_id}/update-item/
+        Payload: { "item_id": 15, "competition_analysis": {...}, "participants_analysis": [...] }
+        """
+        task = self.get_object()
+        item_id = request.data.get('id')
+        item = get_object_or_404(AwardImportItem, id=item_id, task=task)
+
+        # 1. 获取前端传回的修正后的解析内容
+        # 前端通常会修改原始 JSON 中的 selected_id 后把整个对象/列表发回来
+        comp_data = request.data.get('competition_analysis')
+        part_data = request.data.get('participants_analysis')
+        inst_data = request.data.get('instructors_analysis')
+
+        # 2. 更新字段
+        if comp_data is not None:
+            item.competition_analysis = comp_data
+        if part_data is not None:
+            item.participants_analysis = part_data
+        if inst_data is not None:
+            item.instructors_analysis = inst_data
+
+        # 3. 重新校验逻辑 (关键步骤)
+        is_valid, error_msg = self._revalidate_item(item)
+        item.is_valid = is_valid
+        item.error_msg = error_msg
+
+        item.save()
+
+        return Response({
+            "id": item.id,
+            "is_valid": item.is_valid,
+            "error_msg": item.error_msg,
+            "message": "保存成功"
+        })
+
+    def _revalidate_item(self, item):
+        """
+        内部逻辑：检查 item 里的所有 selected_id 是否都已经填充
+        """
+        errors = []
+
+        # 校验竞赛
+        if not item.competition_analysis.get('selected_id'):
+            errors.append("竞赛需确认")
+
+        # 校验学生 (participants_analysis 是列表)
+        missing_parts = [
+            p.get('origin_name') for p in item.participants_analysis
+            if not p.get('selected_id')
+        ]
+        if missing_parts:
+            errors.append(f"学生需确认: {', '.join(missing_parts)}")
+
+        # 校验老师
+        missing_insts = [
+            i.get('origin_name') for i in item.instructors_analysis
+            if not i.get('selected_id')
+        ]
+        if missing_insts:
+            errors.append(f"教师需确认: {', '.join(missing_insts)}")
+
+        if errors:
+            return False, "; ".join(errors)
+        return True, ""
 
     @action(detail=True, methods=['post'])
     def commit(self, request, pk=None):
         """确认暂存数据并入库"""
         task = self.get_object()
         valid_items = task.items.filter(is_valid=True)
+
+        # 只有在解析完成/待修正状态下才能提交
+        if task.status not in ['correcting', 'finished']:
+            return Response({"error": "解析尚未完成或任务已关闭"}, status=400)
 
         if not valid_items.exists():
             return Response({"error": "没有可录入的有效记录"}, status=400)
@@ -451,7 +515,6 @@ class AwardImportViewSet(viewsets.ModelViewSet):
                     competition_id=comp_id,
                     award_level=item.award_level,
                     award_date=item.award_date,
-                    cert_no=item.cert_no,
                     creator=request.user
                 )
                 award.participants.set(participants)
