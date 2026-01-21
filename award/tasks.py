@@ -1,3 +1,4 @@
+import os
 import re
 import pandas as pd
 import numpy as np
@@ -35,8 +36,8 @@ def calculate_match_score(query_clean, target_clean, query_raw, target_raw):
 
 @shared_task(bind=True)
 def process_award_import_task(self, task_id):
+    task_record = AwardImportTask.objects.get(id=task_id)
     try:
-        task_record = AwardImportTask.objects.get(id=task_id)
         task_record.status = 'pending'
         task_record.save()
 
@@ -174,3 +175,14 @@ def process_award_import_task(self, task_id):
         task_record.status = 'failed'
         task_record.save()
         raise e
+    finally:
+        # 物理清理 (独立于事务之外)
+        if task_record.file_name and os.path.exists(task_record.file_name):
+            try:
+                os.remove(task_record.file_name)
+                # 删除后清空路径字段，防止以后重复调用该路径报错
+                task_record.file_name = ""
+                task_record.save()
+            except Exception as cleanup_error:
+                # 防止清理文件时的报错覆盖了 try 块里的原始业务报错
+                print(f"Cleanup failed: {cleanup_error}")
