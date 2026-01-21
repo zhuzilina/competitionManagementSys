@@ -7,6 +7,7 @@ from celery.result import AsyncResult
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
@@ -21,7 +22,7 @@ from rest_framework.response import Response
 from competitionManagementSys import settings
 from competitions.models import Competition
 from .models import Award, AwardImportTask, AwardImportItem
-from .serializers import AwardSerializer, AwardImportItemSerializer
+from .serializers import AwardSerializer, AwardImportItemSerializer, AwardImportTaskSerializer
 from .serializers import AwardReportSerializer
 from userManage.permissions import IsCompAdminOrReadOnly,IsCompAdmin
 from django.db.models import Count,Q,F
@@ -65,13 +66,19 @@ class AwardFilter(django_filters.FilterSet):
         field_name='participants__profile__major',
         lookup_expr='icontains'
     )
+    has_certificate = django_filters.BooleanFilter(
+        field_name='certificate',
+        lookup_expr='isnull',
+        exclude=True  # exclude=True 会反转逻辑，使 true 代表“不为空”
+    )
 
     class Meta:
         model = Award
         fields = [
             'competition_name', 'category', 'level',
             'award_level', 'date_min', 'date_max',
-            'instructor_name', 'college', 'major'
+            'instructor_name', 'college', 'major',
+            'has_certificate'
         ]
 
 class AwardViewSet(viewsets.ModelViewSet):
@@ -333,6 +340,7 @@ class AwardStatisticsView(APIView):
 
 class AwardImportViewSet(viewsets.ModelViewSet):
     queryset = AwardImportTask.objects.all()
+    serializer_class = AwardImportTaskSerializer
     @action(detail=False, methods=['post'])
     def upload(self, request):
         """
@@ -514,7 +522,7 @@ class AwardImportViewSet(viewsets.ModelViewSet):
                 award = Award.objects.create(
                     competition_id=comp_id,
                     award_level=item.award_level,
-                    award_date=item.award_date,
+                    award_date=item.award_date or timezone.now().date(),  # 获取当前日期
                     creator=request.user
                 )
                 award.participants.set(participants)

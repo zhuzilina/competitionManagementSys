@@ -99,7 +99,7 @@ DATABASES = {
         'USER': 'user',
         'PASSWORD': 'password123',
         'HOST': '127.0.0.1',  # 如果 Django 在宿主机运行
-        'PORT': '3306',
+        'PORT': '3307',
     }
 }
 

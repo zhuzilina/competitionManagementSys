@@ -5,7 +5,7 @@ from certificate.models import Certificate
 from competitions.models import Competition
 from competitions.serializers import CompetitionDetailSerializer
 from userProfile.serializers import UserDetailSerializer
-from .models import Award, AwardImportItem
+from .models import Award, AwardImportItem, AwardImportTask
 
 User = get_user_model()
 
@@ -86,6 +86,29 @@ class AwardReportSerializer(serializers.Serializer):
     clazz = serializers.CharField()
     title = serializers.CharField()  # 职称
     awards = AwardInfoSerializer(many=True)  # 该成员关联的所有奖项
+
+
+class AwardImportTaskSerializer(serializers.ModelSerializer):
+    """用于获取导入任务的序列化器"""
+    # 使用 get_status_display 获取 STATUS_CHOICES 中对应的人类可读文本
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    # 自动关联当前登录用户（通常在 View 中处理，但这里可以设置为只读）
+    creator_name = serializers.ReadOnlyField(source='creator.username')
+
+    class Meta:
+        model = AwardImportTask
+        fields = [
+            'id',
+            'celery_task_id',
+            'creator',
+            'creator_name',
+            'status',
+            'status_display',
+            'file_name',
+            'created_at'
+        ]
+        read_only_fields = ['celery_task_id', 'status', 'creator', 'created_at']
 
 
 class AwardImportItemSerializer(serializers.ModelSerializer):
