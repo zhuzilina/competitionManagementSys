@@ -25,10 +25,13 @@ SECRET_KEY = 'django-insecure-gt17a_a03%5ao5fgh(it5apy*frq2g@3!1c&j=u9#me7gl7=3q
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'web',             # 允许 Docker 内部网桥通过服务名访问
+    'localhost',       # 允许本地访问
+    '127.0.0.1',
+]
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8848",  # Vue 默认端口
-    "http://127.0.0.1:8848",
+
 ]
 
 
@@ -98,8 +101,8 @@ DATABASES = {
         'NAME': 'my_project_db',
         'USER': 'user',
         'PASSWORD': 'password123',
-        'HOST': '127.0.0.1',  # 如果 Django 在宿主机运行
-        'PORT': '3307',
+        'HOST': 'db',  # 如果 Django 在宿主机运行
+        'PORT': '3306',
     }
 }
 
@@ -161,14 +164,19 @@ USE_TZ = True
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-STATIC_URL = 'static/'
-
+STATIC_URL = '/static/'
+# 开发环境下静态文件存放的位置
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, "static"),
+]
+STATIC_ROOT = os.path.join(BASE_DIR, 'collected_static')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-redis_host = os.getenv('REDIS_HOST', '127.0.0.1')
+# redis_host = os.getenv('REDIS_HOST', '127.0.0.1')
 # 如果没有设置密码
-CELERY_BROKER_URL = f'redis://{redis_host}:6379/0'
-CELERY_RESULT_BACKEND = f'redis://{redis_host}:6379/0'
-
+# CELERY_BROKER_URL = f'redis://{redis_host}:6379/0'
+# CELERY_RESULT_BACKEND = f'redis://{redis_host}:6379/0'
+CELERY_BROKER_URL = 'redis://redis:6379/0'
+CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
 # 如果你在 compose 里设置了密码 (requirepass password123)
 # CELERY_BROKER_URL = 'redis://:password123@redis:6379/0'
 

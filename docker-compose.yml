@@ -14,15 +14,17 @@ services:
       - mysql_data:/var/lib/mysql
     healthcheck:
       test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - app-network
+
   redis:
     image: redis:7.0-alpine
     restart: always
     ports:
       - "6379:6379"
-    # 如果需要设置密码，取消下面 command 的注释，并把 password_here 换成你的密码
-    # command: redis-server --requirepass password123
     volumes:
       - redis_data:/data
     healthcheck:
@@ -30,7 +32,68 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - app-network
+
+  frontend:
+    build: ~/vscode/vue/competition-management-sys # 指向你前端项目的目录
+    container_name: pure-admin-web
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+    networks:
+      - app-network
+
+  web:
+    build: .
+    # 修改启动命令，使用 uwsgi 启动
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             python manage.py init_project &&
+             uwsgi --ini uwsgi.ini"
+    volumes:
+      - .:/app
+      - ./media:/app/media
+      - ./static:/app/static # 建议也把静态资源挂载出来
+    networks:
+      - app-network
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=0  # 切换到 uWSGI 通常意味着进入非开发模式
+      - DB_HOST=db
+      - DB_NAME=my_project_db
+      - DB_USER=user
+      - DB_PASSWORD=password123
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery:
+    build: .
+    command: celery -A competitionManagementSys worker -l info -P eventlet
+    volumes:
+      - .:/app
+      - ./media:/app/media # Celery 如果处理文件也需要挂载
+    environment:
+      - DB_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
 
 volumes:
   mysql_data:
   redis_data:
+
+networks:
+  app-network:
+    driver: bridge

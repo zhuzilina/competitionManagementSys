@@ -25,10 +25,10 @@ class Command(BaseCommand):
         # 3. 创建不同角色的用户
         # 定义用户信息：(学工号user_id，用户名, 密码, 组名, 是否是超级用户)
         users_to_create = [
-            ('admin1','admin1', 'pass123', None, True),
+            ('admin1','admin1', 'pass123', 'Administrator', True),
             ('admin2','admin2', 'pass123', 'Administrator', False),
-            ('comp3','comp3', 'pass123', 'CompetitionAdministrator', False),
-            ('comp4','comp4', 'pass123', 'CompetitionAdministrator', False),
+            ('comp1','comp1', 'pass123', 'CompetitionAdministrator', False),
+            ('comp2','comp2', 'pass123', 'CompetitionAdministrator', False),
         ]
 
         for uid, uname, pwd, gname, is_staff in users_to_create:
