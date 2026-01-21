@@ -36,7 +36,7 @@ services:
       - app-network
 
   frontend:
-    build: ~/vscode/vue/competition-management-sys # 指向你前端项目的目录
+    build: ../frontend # 指向你前端项目的目录
     container_name: pure-admin-web
     ports:
       - "80:80"
