@@ -10,7 +10,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = Profile
         fields = [
             'user_id', 'real_name', 'phone', 'email',
-            'department', 'major', 'clazz', 'title', 'role_name'
+            'department','college', 'major', 'clazz', 'title', 'role_name'
         ]
 
     def get_role_name(self, obj):

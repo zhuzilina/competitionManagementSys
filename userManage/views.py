@@ -1,3 +1,7 @@
+import os
+
+from celery.result import AsyncResult
+from django.core.files.storage import default_storage
 from django.http import JsonResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, status
@@ -11,6 +15,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from competitionManagementSys import settings
 from .models import Menu
 from .serializers import (
     RegisterSerializer,
@@ -20,6 +25,7 @@ from .serializers import (
 )
 from . import permissions
 from .utils import UserFilter
+from .tasks import import_users_task
 
 User = get_user_model()
 # Create your views here.
@@ -167,3 +173,46 @@ class RoleListView(generics.ListAPIView):
     serializer_class = GroupSerializer
     # 既然只有管理员能管理用户，这里通常也建议加权限控制
     # permission_classes = [IsAdmin]
+
+
+class BulkImportUserView(APIView):
+    def post(self, request):
+        file = request.FILES.get('file')
+        if not file:
+            return Response({"error": "请上传文件"}, status=400)
+
+        # 1. 保存文件到临时目录
+        path = default_storage.save(f'tmp/{file.name}', file)
+        full_path = os.path.join(settings.MEDIA_ROOT, path)
+
+        # 2. 异步触发 Celery 任务
+        task = import_users_task.delay(full_path)
+
+        # 3. 立即返回任务 ID
+        return Response({
+            "message": "导入任务已提交，正在后台处理",
+            "task_id": task.id
+        }, status=status.HTTP_202_ACCEPTED)
+
+
+class TaskStatusView(APIView):
+    def get(self, request, task_id):
+        # 通过 task_id 获取任务结果对象
+        result = AsyncResult(task_id)
+
+        response_data = {
+            "task_id": task_id,
+            "status": result.status,  # PENDING, PROGRESS, SUCCESS, FAILURE
+        }
+
+        if result.status == 'SUCCESS':
+            # 任务成功，返回我们在 tasks.py 里 return 的字典
+            response_data["result"] = result.result
+        elif result.status == 'FAILURE':
+            # 任务失败，返回错误堆栈
+            response_data["error"] = str(result.info)
+        elif result.status == 'PROGRESS':
+            # 如果你在 tasks.py 里使用了 self.update_state 更新进度
+            response_data["progress"] = result.info
+
+        return Response(response_data)

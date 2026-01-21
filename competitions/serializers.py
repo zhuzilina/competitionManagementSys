@@ -42,3 +42,13 @@ class CompetitionEventSerializer(serializers.ModelSerializer):
         ]
         # 将 status 加入只读，强制走模型默认值或后端逻辑
         read_only_fields = ['status', 'final_participants_count', 'final_winners_count']
+
+
+class CompetitionDetailSerializer(serializers.ModelSerializer):
+    # 将外键 ID 替换为嵌套的对象详情
+    level = CompetitionLevelSerializer(read_only=True)
+    category = CompetitionCategorySerializer(read_only=True)
+
+    class Meta:
+        model = Competition
+        fields = ['id', 'title', 'description', 'year', 'uri', 'level', 'category']

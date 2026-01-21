@@ -28,11 +28,19 @@ class CompetitionCategory(models.Model):
 
 
 class Competition(models.Model):
+    SCALE_CHOICES = (
+        ("院级","院级"),
+        ("校级","校级"),
+        ("市级","市级"),
+        ("省级","省级"),
+        ("国家级","国家级"),
+         ("国际级","国际级")
+    )
     """竞赛核心信息"""
     title = models.CharField(max_length=255, verbose_name="竞赛名称")
     description = models.TextField(verbose_name="竞赛简介", blank=True, null=True)
     year = models.IntegerField(verbose_name="举办年份")
-    uri = models.CharField(max_length=8182, verbose_name="竞赛官网")
+    uri = models.CharField(max_length=8182, verbose_name="竞赛官网", blank=True, null=True)
 
     # 使用外键关联动态表
     category = models.ForeignKey(
@@ -46,6 +54,11 @@ class Competition(models.Model):
         on_delete=models.PROTECT,
         related_name="competitions",
         verbose_name="竞赛级别"
+    )
+    scale = models.CharField(
+        max_length=20,
+        verbose_name="竞赛规模",
+        choices=SCALE_CHOICES,
     )
     # 审计信息
     creator = models.ForeignKey(

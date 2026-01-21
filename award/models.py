@@ -67,3 +67,53 @@ class Award(models.Model):
 
     def __str__(self):
         return f"{self.competition.title} - {self.award_level}"
+
+
+class AwardImportTask(models.Model):
+    """导入任务批次表"""
+    STATUS_CHOICES = (
+        ('pending', '待处理'),  # 刚上传，解析中
+        ('correcting', '待修正'),  # 解析完成，等待用户在前端修复错误
+        ('finished', '已完成'),  # 全部入库
+        ('failed', '失败'),
+    )
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    file_name = models.CharField(max_length=255, verbose_name="原始文件名")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AwardImportItem(models.Model):
+    """
+    导入项详情表（每一行 Excel 数据对应一条记录）
+    核心思想：raw_data 存原始文本，parsed_data 存解析后的结构化数据
+    """
+    task = models.ForeignKey(AwardImportTask, related_name='items', on_delete=models.CASCADE)
+
+    # 1. 原始数据快照 (方便前端展示 "你原来填的是啥")
+    raw_competition = models.CharField(max_length=255, blank=True)
+    raw_participants = models.TextField(blank=True)  # "张三, 李四"
+    raw_instructors = models.TextField(blank=True)
+    award_level = models.CharField(max_length=50, blank=True)
+    award_date = models.DateField(null=True, blank=True)
+    cert_no = models.CharField(max_length=100, blank=True)
+
+    # 2. 解析状态
+    is_valid = models.BooleanField(default=False)  # 只有当所有字段都匹配成功时为 True
+    error_msg = models.TextField(blank=True)  # 汇总错误信息，如 "竞赛未找到; 张三有重名"
+
+    # 3. 解析结果 (JSON)
+    # 结构示例：
+    # {
+    #   "status": "success" | "multiple" | "not_found",
+    #   "origin_text": "张三",
+    #   "selected_id": 101,  <-- 前端修正时回填这个字段
+    #   "options": [ {"id": 101, "name": "张三", "dept": "计院"}, ... ]
+    # }
+    competition_analysis = models.JSONField(default=dict)
+    participants_analysis = models.JSONField(default=list)
+    instructors_analysis = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ['id']

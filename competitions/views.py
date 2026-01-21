@@ -1,5 +1,6 @@
 # Create your views here.
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -53,6 +54,7 @@ class CompetitionLevelViewSet(viewsets.ModelViewSet):
     # 设置权限
     permission_classes = [IsCompAdminOrReadOnly]
     serializer_class = CompetitionLevelSerializer
+    pagination_class = None
 
 
 class CompetitionCategoryViewSet(viewsets.ModelViewSet):
@@ -60,6 +62,7 @@ class CompetitionCategoryViewSet(viewsets.ModelViewSet):
     # 设置权限
     permission_classes = [IsCompAdminOrReadOnly]
     serializer_class = CompetitionCategorySerializer
+    pagination_class = None
 
 
 class CompetitionEventViewSet(viewsets.ModelViewSet):

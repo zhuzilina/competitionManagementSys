@@ -2,8 +2,10 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from certificate.models import Certificate
+from competitions.models import Competition
+from competitions.serializers import CompetitionDetailSerializer
 from userProfile.serializers import UserDetailSerializer
-from .models import Award
+from .models import Award, AwardImportItem, AwardImportTask
 
 User = get_user_model()
 
@@ -27,8 +29,16 @@ class AwardSerializer(serializers.ModelSerializer):
     # 2. 证书详情字段 (用于展示：返回编号和图片地址)
     certificate_details = CertificateSerializer(source='certificate', read_only=True)
 
-    # 竞赛名称快捷字段
-    competition_name = serializers.ReadOnlyField(source='competition.title')
+    # 竞赛
+    # 用于写入：保持接收竞赛 ID (PrimaryKey)
+    competition = serializers.PrimaryKeyRelatedField(
+        queryset=Competition.objects.all(),
+        write_only=True
+    )
+
+    # 用于展示：返回竞赛的嵌套详情
+    # 注意：source 依然指向模型上的 competition 字段
+    competition_details = CompetitionDetailSerializer(source='competition', read_only=True)
 
     # 用户关联字段（保持你之前的 SlugRelatedField 设置）
     participants = serializers.SlugRelatedField(
@@ -49,7 +59,7 @@ class AwardSerializer(serializers.ModelSerializer):
     class Meta:
         model = Award
         fields = [
-            'id', 'competition', 'competition_name',
+            'id', 'competition', 'competition_details',
             'certificate', 'certificate_details',  # 包含这两个字段
             'participants', 'participant_details',
             'instructors', 'instructor_details',
@@ -76,3 +86,32 @@ class AwardReportSerializer(serializers.Serializer):
     clazz = serializers.CharField()
     title = serializers.CharField()  # 职称
     awards = AwardInfoSerializer(many=True)  # 该成员关联的所有奖项
+
+
+class AwardImportTaskSerializer(serializers.ModelSerializer):
+    """用于获取导入任务的序列化器"""
+    # 使用 get_status_display 获取 STATUS_CHOICES 中对应的人类可读文本
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    # 自动关联当前登录用户（通常在 View 中处理，但这里可以设置为只读）
+    creator_name = serializers.ReadOnlyField(source='creator.username')
+
+    class Meta:
+        model = AwardImportTask
+        fields = [
+            'id',
+            'celery_task_id',
+            'creator',
+            'creator_name',
+            'status',
+            'status_display',
+            'file_name',
+            'created_at'
+        ]
+        read_only_fields = ['celery_task_id', 'status', 'creator', 'created_at']
+
+
+class AwardImportItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AwardImportItem
+        fields = '__all__' # 或者指定你需要的字段
