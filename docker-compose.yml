@@ -89,6 +89,8 @@ services:
 
       redis:
         condition: service_healthy
+    networks:
+      - app-network
 
 volumes:
   mysql_data:
