@@ -4,6 +4,9 @@ from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.contrib.auth import get_user_model
 
+from competitions.models import CompetitionLevel, CompetitionCategory
+
+
 class Command(BaseCommand):
     help = '初始化项目：执行迁移、创建角色组和初始用户'
 
@@ -21,7 +24,6 @@ class Command(BaseCommand):
                 self.stdout.write(f'成功创建组: {role_name}')
             else:
                 self.stdout.write(f'组 {role_name} 已存在')
-
         # 3. 创建不同角色的用户
         # 定义用户信息：(学工号user_id，用户名, 密码, 组名, 是否是超级用户)
         users_to_create = [
@@ -56,5 +58,28 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.SUCCESS(f'用户 {uid}({uname}) 归属 {gname} 创建成功'))
             else:
                 self.stdout.write(self.style.WARNING(f'用户 {uid} 已存在，跳过'))
+
+        # 4. 初始化竞赛级别
+        self.stdout.write('--- 正在初始化竞赛级别 ---')
+        levels = [
+            ('A', '国家级重点竞赛'),
+            ('B', '普通竞赛'),
+            ('C', '其它类别竞赛'),
+        ]
+        for name, desc in levels:
+            level, created = CompetitionLevel.objects.get_or_create(
+                name=name,
+                defaults={'description': desc}
+            )
+            if created:
+                self.stdout.write(self.style.SUCCESS(f'成功创建级别: {name}'))
+
+        # 5. 初始化竞赛类别 (CompetitionCategory)
+        self.stdout.write('--- 正在初始化竞赛类别 ---')
+        categories = ['创新', '算法', '创业', '技能','计算机']
+        for cat_name in categories:
+            cat, created = CompetitionCategory.objects.get_or_create(name=cat_name)
+            if created:
+                self.stdout.write(self.style.SUCCESS(f'成功创建类别: {cat_name}'))
 
         self.stdout.write(self.style.SUCCESS('项目初始化完成！'))
