@@ -1,5 +1,17 @@
 from rest_framework import permissions
 
+class ReadOnly(permissions.BasePermission):
+    """
+    仅限登录用户
+    """
+
+    def has_permission(self, request, view):
+        # 判断用户是否已登录
+        if not (request.user and request.user.is_authenticated):
+            return False
+
+        return True
+
 class IsCompAdminOrReadOnly(permissions.BasePermission):
     """
     仅竞赛管理者可修改，其余登录用户仅查看。用于竞赛业务管理

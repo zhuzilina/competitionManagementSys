@@ -63,3 +63,9 @@ urllib3==2.6.2
 vine==5.1.0
 wcwidth==0.2.14
 xlrd==2.0.2
+
+openai
+python-dotenv
+langchain-openai
+langchain
+langchain-core

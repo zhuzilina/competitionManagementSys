@@ -90,8 +90,6 @@ class AwardViewSet(viewsets.ModelViewSet):
 
     # 多维度搜索功能
     # 索引优化：
-    # 由于你频繁对 award_date 进行范围查询，以及对 competition__title 进行搜索，
-    # 建议在数据库模型层为 award_date 增加索引，并确保 competition.title 也有索引。
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_class = AwardFilter
 

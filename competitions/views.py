@@ -1,6 +1,7 @@
 # Create your views here.
 from django.db import transaction
 from django.db.models import Q
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -21,9 +22,12 @@ class CompetitionViewSet(viewsets.ModelViewSet):
     serializer_class = CompetitionSerializer
 
     # 1. 指定过滤器后端
-    filter_backends = [filters.SearchFilter]
-    # 2. 指定搜索字段，'title' 前面可以加修饰符
+    filter_backends = [DjangoFilterBackend,filters.SearchFilter]
+    # 搜索：模糊匹配
     search_fields = ['title']
+
+    # 筛选：精确匹配
+    filterset_fields = ['scale', 'level','category']
 
     # 设置权限
     permission_classes = [IsCompAdminOrReadOnly]

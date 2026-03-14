@@ -57,7 +57,8 @@ INSTALLED_APPS = [
     'notification.apps.NotificationConfig',
     'notifications',
     'team.apps.TeamConfig',
-    'django_cleanup.apps.CleanupConfig'
+    'django_cleanup.apps.CleanupConfig',
+    'aiChat.apps.AichatConfig',
 ]
 
 MIDDLEWARE = [
@@ -99,6 +100,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'my_project_db',
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+        },
         'USER': 'user',
         'PASSWORD': 'password123',
         'HOST': 'db',  # 如果 Django 在宿主机运行
