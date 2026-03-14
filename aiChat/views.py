@@ -1,3 +1,6 @@
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.http import StreamingHttpResponse
 
@@ -5,14 +8,14 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from aiChat.models import ChatMessage
+from aiChat.serializers import ChatMessageSerializer
 from aiChat.utils import get_chat_context
-from userManage.permissions import ReadOnly
 
 from aiChat.tools import search_competitions,get_award_analysis_tool
 
 
 class AIStreamChatView(APIView):
-    permission_classes = [ReadOnly]
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         user_input = request.data.get("message")
         llm = ChatOpenAI(model="qwen3.5-flash", streaming=True)
@@ -100,3 +103,33 @@ class AIStreamChatView(APIView):
                 yield f"data: [Error] {str(e)}\n\n"
 
         return StreamingHttpResponse(stream_generator(), content_type='text/event-stream')
+
+# 分页
+class ChatHistoryPagination(PageNumberPagination):
+    page_size = 20          # 每页显示多少条
+    page_size_query_param = 'page_size' # 允许前端通过 ?page_size=50 自定义每页数量
+    max_page_size = 100     # 最大允许每页多少条
+
+
+class ChatHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+    # 将分页类直接绑定到视图属性上（符合 DRF 标准写法）
+    pagination_class = ChatHistoryPagination
+
+    def get(self, request):
+        # 1. 过滤并倒序排序
+        messages = ChatMessage.objects.filter(
+            user=request.user,
+            is_summary=False
+        ).order_by('-created_at')
+
+        # 2. 实例化分页器
+        paginator = self.pagination_class()
+
+        # 3. 执行分页逻辑
+        # 即使 messages 为空，这里也会返回一个空列表，而不是 None
+        page_obj = paginator.paginate_queryset(messages, request, view=self)
+
+        # 4. 统一序列化并返回分页响应
+        serializer = ChatMessageSerializer(page_obj, many=True)
+        return paginator.get_paginated_response(serializer.data)
