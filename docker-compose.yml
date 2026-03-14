@@ -36,7 +36,7 @@ services:
       - app-network
 
   frontend:
-    build: ../frontend # 指向你前端项目的目录
+    build: ../frontend # 指向前端项目的目录
     container_name: pure-admin-web
     ports:
       - "80:80"
@@ -56,7 +56,7 @@ services:
     volumes:
       - .:/app
       - ./media:/app/media
-      - ./static:/app/static # 建议也把静态资源挂载出来
+      - ./static:/app/static # 挂载的静态资源
     networks:
       - app-network
     ports:
@@ -68,6 +68,8 @@ services:
       - DB_USER=user
       - DB_PASSWORD=password123
       - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
     depends_on:
       db:
         condition: service_healthy

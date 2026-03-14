@@ -30,6 +30,7 @@ urlpatterns = [
     path('apply/', include('apply.urls')),
     path('notification/', include('notification.urls')),
     path('team/', include('team.urls')),
+    path('ai/', include('aiChat.urls')),
 ]
 
 if settings.DEBUG:

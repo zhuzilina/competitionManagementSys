@@ -34,7 +34,7 @@ class Competition(models.Model):
         ("市级","市级"),
         ("省级","省级"),
         ("国家级","国家级"),
-         ("国际级","国际级")
+        ("国际级","国际级")
     )
     """竞赛核心信息"""
     title = models.CharField(max_length=255, verbose_name="竞赛名称")
