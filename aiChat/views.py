@@ -1,3 +1,5 @@
+import json
+
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -57,7 +59,9 @@ class AIStreamChatView(APIView):
                     # 如果此时模型直接输出了文本（没有调用工具），直接返给前端
                     if chunk.content and not chunk.tool_call_chunks:
                         full_ai_response += chunk.content
-                        yield f"data: {chunk.content}\n\n"
+                        # 包装成 JSON 字符串，确保换行符变成 \n 文本
+                        data = json.dumps({"content": chunk.content})
+                        yield f"data: {data}\n\n"
                 # 处理工具调用并进行二次生成
                 if response_chunk_accumulator and response_chunk_accumulator.tool_calls:
                     # 把 AI 的"我想调用工具"这个消息加入对话历史
@@ -87,7 +91,8 @@ class AIStreamChatView(APIView):
                     for chunk in llm.stream(full_messages):
                         if chunk.content:
                             full_ai_response += chunk.content
-                            yield f"data: {chunk.content}\n\n"
+                            data = json.dumps({"content": chunk.content})
+                            yield f"data: {data}\n\n"
                 # 保存最终数据
                 print("开始保存助手消息")
                 if full_ai_response:
